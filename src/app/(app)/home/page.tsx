@@ -1,0 +1,324 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { Header } from '@/components/layout/header'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { createClient } from '@/lib/supabase/client'
+import { formatDate, formatTime } from '@/lib/utils'
+import {
+  Calendar,
+  MapPin,
+  Users,
+  CheckCircle,
+  Clock,
+  MinusCircle,
+  Trophy
+} from 'lucide-react'
+
+interface UpcomingMatch {
+  id: string
+  date: string
+  time: string
+  opponent_name: string
+  venue: string | null
+  is_home: boolean
+  team_name: string
+  status: 'in_lineup' | 'off' | 'pending'
+  partner_name?: string
+  court_slot?: number
+}
+
+export default function HomePage() {
+  const [nextMatch, setNextMatch] = useState<UpcomingMatch | null>(null)
+  const [upcomingMatches, setUpcomingMatches] = useState<UpcomingMatch[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadDashboardData()
+  }, [])
+
+  async function loadDashboardData() {
+    const supabase = createClient()
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    // Get user's roster memberships
+    const { data: memberships } = await supabase
+      .from('roster_members')
+      .select(`
+        id,
+        team_id,
+        teams (
+          id,
+          name
+        )
+      `)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+
+    if (!memberships || memberships.length === 0) {
+      setLoading(false)
+      return
+    }
+
+    const teamIds = memberships.map(m => m.team_id)
+    const rosterMemberIds = memberships.map(m => m.id)
+
+    // Get upcoming matches for user's teams
+    const today = new Date().toISOString().split('T')[0]
+    const { data: matches } = await supabase
+      .from('matches')
+      .select(`
+        id,
+        date,
+        time,
+        opponent_name,
+        venue,
+        is_home,
+        team_id,
+        teams (
+          name
+        )
+      `)
+      .in('team_id', teamIds)
+      .gte('date', today)
+      .order('date', { ascending: true })
+      .order('time', { ascending: true })
+      .limit(10)
+
+    if (!matches) {
+      setLoading(false)
+      return
+    }
+
+    // Get lineups and availability for these matches
+    const matchIds = matches.map(m => m.id)
+
+    const { data: lineups } = await supabase
+      .from('lineups')
+      .select(`
+        match_id,
+        court_slot,
+        player1_id,
+        player2_id,
+        is_published,
+        player1:roster_members!lineups_player1_id_fkey (
+          id,
+          full_name
+        ),
+        player2:roster_members!lineups_player2_id_fkey (
+          id,
+          full_name
+        )
+      `)
+      .in('match_id', matchIds)
+      .eq('is_published', true)
+
+    const { data: availabilities } = await supabase
+      .from('availability')
+      .select('*')
+      .in('match_id', matchIds)
+      .in('roster_member_id', rosterMemberIds)
+
+    // Process matches with status
+    const processedMatches: UpcomingMatch[] = matches.map(match => {
+      const membership = memberships.find(m => m.team_id === match.team_id)
+      const memberRosterId = membership?.id
+
+      // Check if user is in lineup
+      const userLineup = lineups?.find(l =>
+        l.match_id === match.id &&
+        (l.player1_id === memberRosterId || l.player2_id === memberRosterId)
+      )
+
+      // Check availability response
+      const availability = availabilities?.find(a =>
+        a.match_id === match.id && a.roster_member_id === memberRosterId
+      )
+
+      let status: 'in_lineup' | 'off' | 'pending' = 'pending'
+      let partnerName: string | undefined
+      let courtSlot: number | undefined
+
+      if (userLineup) {
+        status = 'in_lineup'
+        courtSlot = userLineup.court_slot
+        if (userLineup.player1_id === memberRosterId && userLineup.player2) {
+          partnerName = (userLineup.player2 as { full_name: string }).full_name
+        } else if (userLineup.player1) {
+          partnerName = (userLineup.player1 as { full_name: string }).full_name
+        }
+      } else if (lineups?.some(l => l.match_id === match.id)) {
+        // Lineup posted but user not in it
+        status = 'off'
+      } else if (!availability) {
+        status = 'pending'
+      }
+
+      return {
+        id: match.id,
+        date: match.date,
+        time: match.time,
+        opponent_name: match.opponent_name,
+        venue: match.venue,
+        is_home: match.is_home,
+        team_name: (match.teams as { name: string }).name,
+        status,
+        partner_name: partnerName,
+        court_slot: courtSlot,
+      }
+    })
+
+    // Find next match where user is in lineup
+    const nextInLineup = processedMatches.find(m => m.status === 'in_lineup')
+    setNextMatch(nextInLineup || processedMatches[0] || null)
+    setUpcomingMatches(processedMatches)
+    setLoading(false)
+  }
+
+  const getStatusIcon = (status: 'in_lineup' | 'off' | 'pending') => {
+    switch (status) {
+      case 'in_lineup':
+        return <CheckCircle className="h-5 w-5 text-green-500" />
+      case 'off':
+        return <MinusCircle className="h-5 w-5 text-gray-400" />
+      case 'pending':
+        return <Clock className="h-5 w-5 text-yellow-500" />
+    }
+  }
+
+  const getStatusLabel = (status: 'in_lineup' | 'off' | 'pending') => {
+    switch (status) {
+      case 'in_lineup':
+        return 'In Lineup'
+      case 'off':
+        return 'Off'
+      case 'pending':
+        return 'Pending'
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col min-h-screen">
+      <Header title="TennisLife" />
+
+      <main className="flex-1 p-4 space-y-4">
+        {/* Hero Card - Next Playing */}
+        {nextMatch && nextMatch.status === 'in_lineup' ? (
+          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Next Playing</CardTitle>
+                <Trophy className="h-5 w-5" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  <span className="font-medium">
+                    {formatDate(nextMatch.date, 'EEEE, MMM d')} at {formatTime(nextMatch.time)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  <span>vs {nextMatch.opponent_name}</span>
+                  <Badge variant="secondary" className="ml-auto bg-white/20 text-white">
+                    {nextMatch.is_home ? 'Home' : 'Away'}
+                  </Badge>
+                </div>
+                {nextMatch.venue && (
+                  <div className="flex items-center gap-2">
+                    <MapPin className="h-4 w-4" />
+                    <span className="text-sm">{nextMatch.venue}</span>
+                  </div>
+                )}
+                {nextMatch.partner_name && (
+                  <div className="pt-2 border-t border-white/20">
+                    <p className="text-sm">
+                      Court {nextMatch.court_slot} with <span className="font-medium">{nextMatch.partner_name}</span>
+                    </p>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">No Upcoming Match</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                You&apos;re not currently in any lineup. Check back soon!
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Upcoming Matches List */}
+        <div className="space-y-2">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1">
+            Upcoming Matches
+          </h2>
+
+          {upcomingMatches.length === 0 ? (
+            <Card>
+              <CardContent className="py-6 text-center">
+                <p className="text-muted-foreground">No upcoming matches</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {upcomingMatches.map((match) => (
+                <Card key={match.id} className="hover:bg-accent/50 transition-colors cursor-pointer">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium truncate">
+                            vs {match.opponent_name}
+                          </span>
+                          <Badge variant="outline" className="text-xs shrink-0">
+                            {match.team_name}
+                          </Badge>
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {formatDate(match.date, 'MMM d')} at {formatTime(match.time)}
+                        </div>
+                        {match.venue && (
+                          <div className="text-xs text-muted-foreground mt-1 truncate">
+                            {match.venue}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex flex-col items-center gap-1 shrink-0">
+                        {getStatusIcon(match.status)}
+                        <span className="text-xs text-muted-foreground">
+                          {getStatusLabel(match.status)}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  )
+}
