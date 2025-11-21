@@ -17,7 +17,7 @@ interface LineupPlayingEmailData {
   match: Match
   team: Team
   player: RosterMember
-  partner: RosterMember
+  partner: RosterMember | null // Partner is null for singles matches
   courtSlot: number
 }
 
@@ -83,6 +83,11 @@ ${team.name}`
 
     const subject = `You're IN the lineup – ${formatDate(match.date)} vs ${match.opponent_name} (${homeAway})`
 
+    // Handle singles (no partner) vs doubles (with partner)
+    const partnerLine = partner
+      ? `Court ${courtSlot} (with ${partner.full_name})`
+      : `Court ${courtSlot} (Singles)`
+
     const body = `Hi ${playerFirstName},
 
 You are in the lineup for our match vs ${match.opponent_name} on ${formatDate(match.date)}.
@@ -91,7 +96,7 @@ ${warmupMessage}
 Match starts: ${formatTime(match.time)} sharp
 
 Location: ${match.venue || team.venue_address || 'TBD'}
-Playing Line: Court ${courtSlot} (with ${partner.full_name})
+Playing Line: ${partnerLine}
 
 Confirm you are available: ${process.env.NEXT_PUBLIC_APP_URL || 'https://tennislife.app'}
 
@@ -179,6 +184,7 @@ ${captainNames || team.name}`
 
   /**
    * Generate lineup summary for bench emails
+   * Handles both singles (player1 only) and doubles (player1 + player2)
    */
   static generateLineupSummary(
     lineups: Array<{
@@ -188,9 +194,17 @@ ${captainNames || team.name}`
     }>
   ): string {
     return lineups
-      .filter(l => l.player1 && l.player2)
+      .filter(l => l.player1) // Only need player1 to be present
       .sort((a, b) => a.court_slot - b.court_slot)
-      .map(l => `Court ${l.court_slot}: ${l.player1!.full_name} & ${l.player2!.full_name}`)
+      .map(l => {
+        if (l.player2) {
+          // Doubles match
+          return `Court ${l.court_slot}: ${l.player1!.full_name} & ${l.player2.full_name}`
+        } else {
+          // Singles match
+          return `Court ${l.court_slot}: ${l.player1!.full_name} (Singles)`
+        }
+      })
       .join('\n')
   }
 }

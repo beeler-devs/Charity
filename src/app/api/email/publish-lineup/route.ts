@@ -87,12 +87,13 @@ export async function POST(request: NextRequest) {
       const player1 = lineup.player1 as RosterMember | null
       const player2 = lineup.player2 as RosterMember | null
 
-      if (player1?.email && player2) {
+      // Send email to player1 (always send if player1 has email, regardless of singles/doubles)
+      if (player1?.email) {
         const emailData = EmailService.compileLineupPlayingEmail({
           match,
           team,
           player: player1,
-          partner: player2,
+          partner: player2, // Will be null for singles matches
           courtSlot: lineup.court_slot,
         })
 
@@ -118,7 +119,8 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      if (player2?.email && player1) {
+      // Send email to player2 (only if doubles match and player2 has email)
+      if (player2?.email) {
         const emailData = EmailService.compileLineupPlayingEmail({
           match,
           team,
