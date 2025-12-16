@@ -54,6 +54,34 @@ export function CreateTeamDialog({ open, onOpenChange, onCreated }: CreateTeamDi
       return
     }
 
+    // Ensure profile exists before creating team
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    if (!existingProfile) {
+      // Create profile if it doesn't exist
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: user.id,
+          email: user.email!,
+          full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || null,
+        })
+
+      if (profileError) {
+        toast({
+          title: 'Error',
+          description: `Failed to create profile: ${profileError.message}`,
+          variant: 'destructive',
+        })
+        setLoading(false)
+        return
+      }
+    }
+
     const { error } = await supabase.from('teams').insert({
       name,
       captain_id: user.id,

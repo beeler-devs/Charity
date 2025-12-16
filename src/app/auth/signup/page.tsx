@@ -24,14 +24,14 @@ export default function SignUpPage() {
     setLoading(true)
 
     const supabase = createClient()
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        // No emailRedirectTo needed since we're auto-signing in
       },
     })
 
@@ -41,12 +41,59 @@ export default function SignUpPage() {
         description: error.message,
         variant: 'destructive',
       })
-    } else {
+      setLoading(false)
+      return
+    }
+
+    // If user was created and session is available (email confirmation disabled)
+    if (data.user && data.session) {
+      console.log('User created and signed in:', { id: data.user.id, email: data.user.email })
+      
+      // Ensure profile exists (database trigger should create it, but check as fallback)
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', data.user.id)
+        .maybeSingle()
+
+      if (!existingProfile) {
+        // Create profile if trigger didn't run
+        console.log('Profile not found, creating manually...')
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert({
+            id: data.user.id,
+            email: data.user.email!,
+            full_name: fullName || data.user.user_metadata?.full_name || null,
+          })
+
+        if (profileError) {
+          console.error('Failed to create profile:', profileError)
+          // Don't fail signup, trigger should handle it
+        } else {
+          console.log('Profile created successfully')
+        }
+      }
+
+      toast({
+        title: 'Account created!',
+        description: 'Welcome to TennisLife',
+      })
+      router.push('/home')
+      router.refresh()
+    } else if (data.user) {
+      // User created but needs email confirmation
       toast({
         title: 'Success',
         description: 'Check your email to confirm your account',
       })
       router.push('/auth/login')
+    } else {
+      toast({
+        title: 'Error',
+        description: 'Failed to create account',
+        variant: 'destructive',
+      })
     }
 
     setLoading(false)

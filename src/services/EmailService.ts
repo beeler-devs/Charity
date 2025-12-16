@@ -151,8 +151,28 @@ ${captainNames || team.name}`
 
   /**
    * Send email using the configured email service (Resend)
+   * Falls back to console logging if RESEND_API_KEY is not configured
    */
   static async send(emailData: EmailData): Promise<{ success: boolean; error?: string }> {
+    // Development mode: If RESEND_API_KEY is not set, log to console instead
+    if (!process.env.RESEND_API_KEY || process.env.RESEND_API_KEY === 'your_resend_api_key') {
+      console.log('\n📧 [EMAIL SERVICE - DEVELOPMENT MODE]')
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+      console.log(`To: ${emailData.to}`)
+      console.log(`Subject: ${emailData.subject}`)
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+      console.log(emailData.body)
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n')
+      
+      // Return success so the app continues to work
+      // The email will still be logged to the database with status 'pending' or 'dev_mode'
+      return { 
+        success: true,
+        error: 'Email service not configured - logged to console (development mode)'
+      }
+    }
+
+    // Production mode: Send via Resend API
     try {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',

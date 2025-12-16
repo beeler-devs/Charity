@@ -22,8 +22,8 @@ CREATE TABLE IF NOT EXISTS profiles (
 CREATE TABLE IF NOT EXISTS teams (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name TEXT NOT NULL,
-  captain_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
-  co_captain_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  captain_id UUID REFERENCES profiles(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+  co_captain_id UUID REFERENCES profiles(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
   league_format TEXT CHECK (league_format IN ('USTA', 'CUP', 'FLEX')) DEFAULT 'USTA',
   season TEXT,
   rating_limit DECIMAL(2,1),
@@ -262,7 +262,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Profiles: Users can read all profiles, update their own
 CREATE POLICY "Profiles are viewable by everyone" ON profiles FOR SELECT USING (true);
 CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.uid() = id);
-CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+CREATE POLICY "Users can insert own profile" ON profiles FOR INSERT WITH CHECK (auth.uid() = id OR auth.uid() IS NULL);
 
 -- Teams: Members can view teams they belong to (FIXED)
 CREATE POLICY "Team members can view team" ON teams FOR SELECT
@@ -449,11 +449,27 @@ CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
   INSERT INTO profiles (id, email, full_name)
-  VALUES (NEW.id, NEW.email, NEW.raw_user_meta_data->>'full_name');
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.email, ''),
+    COALESCE(
+      NEW.raw_user_meta_data->>'full_name',
+      NEW.raw_app_meta_data->>'full_name',
+      NULL
+    )
+  )
+  ON CONFLICT (id) DO NOTHING; -- Prevent errors if profile already exists
   RETURN NEW;
+EXCEPTION
+  WHEN others THEN
+    -- Log error but don't fail user creation
+    RAISE WARNING 'Failed to create profile for user %: %', NEW.id, SQLERRM;
+    RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Drop trigger if it exists, then recreate
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION handle_new_user();

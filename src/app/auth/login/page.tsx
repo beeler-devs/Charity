@@ -23,21 +23,29 @@ export default function LoginPage() {
     e.preventDefault()
     setLoading(true)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      })
 
-    if (error) {
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        })
+      } else {
+        router.push('/home')
+        router.refresh()
+      }
+    } catch (err) {
       toast({
-        title: 'Error',
-        description: error.message,
+        title: 'Configuration Error',
+        description: err instanceof Error ? err.message : 'Failed to initialize Supabase client. Please check your environment variables.',
         variant: 'destructive',
       })
-    } else {
-      router.push('/home')
-      router.refresh()
     }
 
     setLoading(false)
@@ -55,26 +63,45 @@ export default function LoginPage() {
 
     setLoading(true)
 
-    const supabase = createClient()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    })
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+        },
+      })
 
-    if (error) {
-      toast({
-        title: 'Error',
-        description: error.message,
-        variant: 'destructive',
-      })
-    } else {
-      setMagicLinkSent(true)
-      toast({
-        title: 'Magic link sent',
-        description: 'Check your email for the login link',
-      })
+      if (error) {
+        toast({
+          title: 'Error',
+          description: error.message,
+          variant: 'destructive',
+        })
+      } else {
+        setMagicLinkSent(true)
+        toast({
+          title: 'Magic link sent',
+          description: 'Check your email for the login link',
+        })
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
+      
+      // Check if it's a network/fetch error
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('NetworkError')) {
+        toast({
+          title: 'Connection Error',
+          description: 'Unable to connect to Supabase. Please check: 1) Your Supabase project is active, 2) The URL in .env.local is correct, 3) Your internet connection.',
+          variant: 'destructive',
+        })
+      } else {
+        toast({
+          title: 'Configuration Error',
+          description: errorMessage,
+          variant: 'destructive',
+        })
+      }
     }
 
     setLoading(false)

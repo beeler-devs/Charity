@@ -104,7 +104,8 @@ export async function POST(request: NextRequest) {
           error: result.error,
         })
 
-        // Log email
+        // Log email - use 'pending' if in dev mode (no API key), otherwise use 'sent' or 'failed'
+        const isDevMode = result.error?.includes('development mode')
         await supabase.from('email_logs').insert({
           match_id: matchId,
           team_id: teamId,
@@ -113,8 +114,8 @@ export async function POST(request: NextRequest) {
           recipient_name: player1.full_name,
           subject: emailData.subject,
           body: emailData.body,
-          status: result.success ? 'sent' : 'failed',
-          sent_at: result.success ? new Date().toISOString() : null,
+          status: isDevMode ? 'pending' : (result.success ? 'sent' : 'failed'),
+          sent_at: result.success && !isDevMode ? new Date().toISOString() : null,
           error_message: result.error,
         })
       }
@@ -136,7 +137,8 @@ export async function POST(request: NextRequest) {
           error: result.error,
         })
 
-        // Log email
+        // Log email - use 'pending' if in dev mode (no API key), otherwise use 'sent' or 'failed'
+        const isDevMode = result.error?.includes('development mode')
         await supabase.from('email_logs').insert({
           match_id: matchId,
           team_id: teamId,
@@ -145,8 +147,8 @@ export async function POST(request: NextRequest) {
           recipient_name: player2.full_name,
           subject: emailData.subject,
           body: emailData.body,
-          status: result.success ? 'sent' : 'failed',
-          sent_at: result.success ? new Date().toISOString() : null,
+          status: isDevMode ? 'pending' : (result.success ? 'sent' : 'failed'),
+          sent_at: result.success && !isDevMode ? new Date().toISOString() : null,
           error_message: result.error,
         })
       }
@@ -173,7 +175,8 @@ export async function POST(request: NextRequest) {
         error: result.error,
       })
 
-      // Log email
+      // Log email - use 'pending' if in dev mode (no API key), otherwise use 'sent' or 'failed'
+      const isDevMode = result.error?.includes('development mode')
       await supabase.from('email_logs').insert({
         match_id: matchId,
         team_id: teamId,
@@ -182,8 +185,8 @@ export async function POST(request: NextRequest) {
         recipient_name: player.full_name,
         subject: emailData.subject,
         body: emailData.body,
-        status: result.success ? 'sent' : 'failed',
-        sent_at: result.success ? new Date().toISOString() : null,
+        status: isDevMode ? 'pending' : (result.success ? 'sent' : 'failed'),
+        sent_at: result.success && !isDevMode ? new Date().toISOString() : null,
         error_message: result.error,
       })
     }
