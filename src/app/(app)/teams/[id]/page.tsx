@@ -17,7 +17,8 @@ import {
   Upload,
   ChevronRight,
   Settings,
-  ListChecks
+  ListChecks,
+  MessageCircle
 } from 'lucide-react'
 import { ImportScheduleDialog } from '@/components/teams/import-schedule-dialog'
 
@@ -29,6 +30,7 @@ export default function TeamDetailPage() {
   const [rosterCount, setRosterCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [showImportDialog, setShowImportDialog] = useState(false)
+  const [teamConversationId, setTeamConversationId] = useState<string | null>(null)
 
   useEffect(() => {
     loadTeamData()
@@ -67,6 +69,33 @@ export default function TeamDetailPage() {
       .eq('is_active', true)
 
     setRosterCount(count || 0)
+
+    // Load or create team conversation
+    const { data: existingConv } = await supabase
+      .from('conversations')
+      .select('id')
+      .eq('kind', 'team')
+      .eq('team_id', teamId)
+      .maybeSingle()
+
+    if (existingConv) {
+      setTeamConversationId(existingConv.id)
+    } else {
+      // Create conversation if it doesn't exist
+      const { data: newConv } = await supabase
+        .from('conversations')
+        .insert({
+          kind: 'team',
+          team_id: teamId,
+        })
+        .select('id')
+        .single()
+
+      if (newConv) {
+        setTeamConversationId(newConv.id)
+      }
+    }
+
     setLoading(false)
   }
 
@@ -110,7 +139,7 @@ export default function TeamDetailPage() {
         </Card>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <Link href={`/teams/${teamId}/roster`}>
             <Card className="hover:bg-accent/50 transition-colors cursor-pointer h-full">
               <CardContent className="p-4 flex flex-col items-center justify-center text-center">
@@ -120,6 +149,17 @@ export default function TeamDetailPage() {
               </CardContent>
             </Card>
           </Link>
+          {teamConversationId && (
+            <Link href={`/messages/${teamConversationId}`}>
+              <Card className="hover:bg-accent/50 transition-colors cursor-pointer h-full">
+                <CardContent className="p-4 flex flex-col items-center justify-center text-center">
+                  <MessageCircle className="h-6 w-6 mb-2 text-primary" />
+                  <span className="text-sm font-medium">Team Chat</span>
+                  <span className="text-xs text-muted-foreground">Messages</span>
+                </CardContent>
+              </Card>
+            </Link>
+          )}
           <Card
             className="hover:bg-accent/50 transition-colors cursor-pointer"
             onClick={() => setShowImportDialog(true)}

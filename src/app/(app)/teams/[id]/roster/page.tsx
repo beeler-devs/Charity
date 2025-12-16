@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { createClient } from '@/lib/supabase/client'
 import { RosterMember } from '@/types/database.types'
-import { Plus, Upload, MoreVertical, Crown } from 'lucide-react'
+import { Plus, Upload, MoreVertical, Crown, MessageCircle, User } from 'lucide-react'
 import { AddPlayerDialog } from '@/components/teams/add-player-dialog'
 
 export default function RosterPage() {
@@ -103,15 +103,34 @@ export default function RosterPage() {
               <Card key={player.id}>
                 <CardContent className="p-3">
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-10 w-10">
-                      <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                        {getInitials(player.full_name)}
-                      </AvatarFallback>
-                    </Avatar>
+                    {player.user_id ? (
+                      <Link href={`/users/${player.user_id}`}>
+                        <Avatar className="h-10 w-10 cursor-pointer hover:opacity-80 transition-opacity">
+                          <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                            {getInitials(player.full_name)}
+                          </AvatarFallback>
+                        </Avatar>
+                      </Link>
+                    ) : (
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-muted text-muted-foreground text-sm">
+                          {getInitials(player.full_name)}
+                        </AvatarFallback>
+                      </Avatar>
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-medium truncate">{player.full_name}</span>
+                        {player.user_id ? (
+                          <Link href={`/users/${player.user_id}`} className="hover:underline">
+                            <span className="font-medium truncate">{player.full_name}</span>
+                          </Link>
+                        ) : (
+                          <span className="font-medium truncate">{player.full_name}</span>
+                        )}
                         {getRoleBadge(player.role)}
+                        {!player.user_id && (
+                          <Badge variant="outline" className="text-xs">Not on app</Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         {player.ntrp_rating && (
@@ -122,14 +141,18 @@ export default function RosterPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-right">
+                    <div className="flex items-center gap-1">
+                      {player.user_id && (
+                        <Link href={`/users/${player.user_id}`}>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <User className="h-4 w-4" />
+                          </Button>
+                        </Link>
+                      )}
+                      <div className="text-right px-2">
                         <p className="text-xs text-muted-foreground">Fair Play</p>
                         <p className="text-sm font-medium">{player.fair_play_score}</p>
                       </div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
                     </div>
                   </div>
                 </CardContent>
