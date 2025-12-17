@@ -111,7 +111,7 @@ export default function ConversationPage() {
     // Load messages
     await loadMessages()
 
-    // Subscribe to new messages
+    // Subscribe to new messages (only from other users)
     const channel = supabase
       .channel(`messages:${conversationId}`)
       .on(
@@ -125,6 +125,9 @@ export default function ConversationPage() {
         async (payload) => {
           const newMessage = payload.new as Message
 
+          // Skip if it's from the current user (already added optimistically)
+          if (newMessage.sender_id === user.id) return
+
           // Load sender profile
           const { data: sender } = await supabase
             .from('profiles')
@@ -132,7 +135,12 @@ export default function ConversationPage() {
             .eq('id', newMessage.sender_id)
             .maybeSingle()
 
-          setMessages(prev => [...prev, { ...newMessage, sender: sender || undefined }])
+          // Add message only if it doesn't already exist
+          setMessages(prev => {
+            const exists = prev.some(m => m.id === newMessage.id)
+            if (exists) return prev
+            return [...prev, { ...newMessage, sender: sender || undefined }]
+          })
         }
       )
       .subscribe()
@@ -180,23 +188,67 @@ export default function ConversationPage() {
 
     setSending(true)
     const supabase = createClient()
+    const messageText = messageBody.trim()
 
-    const { error } = await supabase
+    // Get current user profile for optimistic update
+    const { data: { user } } = await supabase.auth.getUser()
+    const { data: userProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', currentUserId)
+      .single()
+
+    // Create optimistic message
+    const optimisticMessage: MessageWithSender = {
+      id: `temp-${Date.now()}`, // Temporary ID
+      conversation_id: conversationId,
+      sender_id: currentUserId,
+      body: messageText,
+      created_at: new Date().toISOString(),
+      sender: userProfile || undefined,
+    }
+
+    // Optimistically add message to UI
+    setMessages(prev => [...prev, optimisticMessage])
+    setMessageBody('')
+
+    // Insert into database
+    const { data, error } = await supabase
       .from('messages')
       .insert({
         conversation_id: conversationId,
         sender_id: currentUserId,
-        body: messageBody.trim(),
+        body: messageText,
       })
+      .select()
+      .single()
 
     if (error) {
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id))
+      setMessageBody(messageText) // Restore message text
       toast({
         title: 'Failed to send message',
         description: error.message,
         variant: 'destructive',
       })
-    } else {
-      setMessageBody('')
+    } else if (data) {
+      // Replace optimistic message with real one, ensuring no duplicates
+      setMessages(prev => {
+        // Remove the optimistic message
+        const withoutOptimistic = prev.filter(m => m.id !== optimisticMessage.id)
+        
+        // Check if the real message already exists (from realtime subscription)
+        const realMessageExists = withoutOptimistic.some(m => m.id === data.id)
+        
+        if (realMessageExists) {
+          // If it already exists, just remove the optimistic one
+          return withoutOptimistic
+        } else {
+          // Add the real message
+          return [...withoutOptimistic, { ...data, sender: userProfile || undefined }]
+        }
+      })
     }
 
     setSending(false)
