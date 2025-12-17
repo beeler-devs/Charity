@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +14,8 @@ import {
   CheckCircle,
   Clock,
   MinusCircle,
-  Trophy
+  Trophy,
+  ChevronRight
 } from 'lucide-react'
 
 interface UpcomingMatch {
@@ -29,9 +31,17 @@ interface UpcomingMatch {
   court_slot?: number
 }
 
+interface Team {
+  id: string
+  name: string
+  league_format: string | null
+  season: string | null
+}
+
 export default function HomePage() {
   const [nextMatch, setNextMatch] = useState<UpcomingMatch | null>(null)
   const [upcomingMatches, setUpcomingMatches] = useState<UpcomingMatch[]>([])
+  const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -55,11 +65,29 @@ export default function HomePage() {
         team_id,
         teams (
           id,
-          name
+          name,
+          league_format,
+          season
         )
       `)
       .eq('user_id', user.id)
       .eq('is_active', true)
+
+    // Get teams where user is captain or co-captain
+    const { data: captainTeams } = await supabase
+      .from('teams')
+      .select('id, name, league_format, season')
+      .or(`captain_id.eq.${user.id},co_captain_id.eq.${user.id}`)
+
+    // Combine and deduplicate teams
+    const allTeams = [
+      ...(memberships?.map(m => m.teams as Team).filter(Boolean) || []),
+      ...(captainTeams || [])
+    ]
+    const uniqueTeams = allTeams.filter((team, index, self) =>
+      index === self.findIndex(t => t.id === team.id)
+    )
+    setTeams(uniqueTeams)
 
     if (!memberships || memberships.length === 0) {
       setLoading(false)
@@ -215,7 +243,10 @@ export default function HomePage() {
     <div className="flex flex-col min-h-screen">
       <Header title="TennisLife" />
 
-      <main className="flex-1 p-4 space-y-4">
+      <main className="flex-1 p-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Left column - Upcoming Matches (takes 2/3 on large screens) */}
+          <div className="lg:col-span-2 space-y-4">
         {/* Hero Card - Next Playing */}
         {nextMatch && nextMatch.status === 'in_lineup' ? (
           <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white">
@@ -317,6 +348,56 @@ export default function HomePage() {
               ))}
             </div>
           )}
+        </div>
+          </div>
+
+          {/* Right column - My Teams */}
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">
+                My Teams
+              </h2>
+              {teams.length === 0 ? (
+                <Card>
+                  <CardContent className="py-6 text-center">
+                    <Users className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">No teams yet</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-2">
+                  {teams.map((team) => (
+                    <Link key={team.id} href={`/teams/${team.id}`}>
+                      <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+                        <CardContent className="p-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate text-sm">{team.name}</p>
+                              {(team.league_format || team.season) && (
+                                <div className="flex items-center gap-2 mt-1">
+                                  {team.league_format && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {team.league_format}
+                                    </Badge>
+                                  )}
+                                  {team.season && (
+                                    <span className="text-xs text-muted-foreground truncate">
+                                      {team.season}
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </main>
     </div>
