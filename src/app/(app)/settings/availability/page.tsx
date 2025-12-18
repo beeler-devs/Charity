@@ -8,7 +8,7 @@ import { AvailabilityGrid } from '@/components/availability/availability-grid'
 import { createClient } from '@/lib/supabase/client'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2, Save } from 'lucide-react'
-import { getAllDays } from '@/lib/availability-utils'
+import { getAllDays, getAllTimeSlots } from '@/lib/availability-utils'
 
 export default function DefaultAvailabilityPage() {
   const [availability, setAvailability] = useState<Record<string, string[]>>({})
@@ -35,15 +35,11 @@ export default function DefaultAvailabilityPage() {
       .eq('id', user.id)
       .single()
 
-    if (profile?.availability_defaults) {
+    if (profile?.availability_defaults && Object.keys(profile.availability_defaults).length > 0) {
       setAvailability(profile.availability_defaults as Record<string, string[]>)
     } else {
-      // Initialize with empty arrays for all days
-      const emptyAvailability: Record<string, string[]> = {}
-      getAllDays().forEach(day => {
-        emptyAvailability[day] = []
-      })
-      setAvailability(emptyAvailability)
+      // Initialize with all time slots selected (available anytime by default)
+      setAvailability(getAllTimeSlots())
     }
 
     setLoading(false)
@@ -106,6 +102,12 @@ export default function DefaultAvailabilityPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-4 p-3 bg-muted rounded-lg text-sm">
+              <p className="text-muted-foreground">
+                By default, you're available at all times. Click and drag to deselect times when you're NOT available.
+              </p>
+            </div>
+            
             <AvailabilityGrid
               mode="weekly"
               selectedSlots={availability}

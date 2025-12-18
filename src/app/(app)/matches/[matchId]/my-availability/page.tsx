@@ -99,18 +99,13 @@ export default function MatchAvailabilityPage() {
         .eq('id', user.id)
         .single()
 
-      if (profile?.availability_defaults) {
-        const calculatedStatus = calculateMatchAvailability(
-          matchData.date,
-          matchData.time,
-          profile.availability_defaults as Record<string, string[]>
-        )
-        setStatus(calculatedStatus)
-        setAutoCalculated(true)
-      } else {
-        setStatus('unavailable')
-        setAutoCalculated(true)
-      }
+      const calculatedStatus = calculateMatchAvailability(
+        matchData.date,
+        matchData.time,
+        profile?.availability_defaults as Record<string, string[]> | null | undefined
+      )
+      setStatus(calculatedStatus)
+      setAutoCalculated(true)
     }
 
     setLoading(false)
@@ -253,8 +248,8 @@ export default function MatchAvailabilityPage() {
             {autoCalculated && (
               <div className="bg-muted p-3 rounded-lg text-sm">
                 <p className="text-muted-foreground">
-                  Based on your default availability for {format(new Date(match.date), 'EEEE')}s, 
-                  you are automatically marked as <span className="font-medium">{status}</span> for this match.
+                  Based on your default availability settings, you are automatically marked as{' '}
+                  <span className="font-medium">{status}</span> for this match.
                   You can change this below if needed.
                 </p>
               </div>

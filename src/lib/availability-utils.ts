@@ -71,11 +71,28 @@ export function isTimeAvailable(
 export function calculateMatchAvailability(
   matchDate: string,
   matchTime: string,
-  availabilityDefaults: Record<string, string[]>
+  availabilityDefaults: Record<string, string[]> | null | undefined
 ): 'available' | 'unavailable' {
+  // If no defaults set, user is available anytime (default behavior)
+  if (!availabilityDefaults || Object.keys(availabilityDefaults).length === 0) {
+    return 'available'
+  }
+  
   const dayOfWeek = getDayOfWeek(new Date(matchDate))
   const slotsForDay = getDefaultsForDay(availabilityDefaults, dayOfWeek)
   
   return isTimeAvailable(matchTime, slotsForDay) ? 'available' : 'unavailable'
+}
+
+// Get all time slots for all days (used for default "available anytime")
+export function getAllTimeSlots(): Record<string, string[]> {
+  const allSlots = generateTimeSlots(6, 22)
+  const defaults: Record<string, string[]> = {}
+  
+  getAllDays().forEach(day => {
+    defaults[day] = [...allSlots]
+  })
+  
+  return defaults
 }
 

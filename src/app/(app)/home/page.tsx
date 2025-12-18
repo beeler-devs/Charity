@@ -210,11 +210,11 @@ export default function HomePage() {
       )
       
       // If no availability set, auto-calculate from defaults
-      if (!availability && profile?.availability_defaults) {
+      if (!availability) {
         const autoStatus = calculateMatchAvailability(
           match.date,
           match.time,
-          profile.availability_defaults as Record<string, string[]>
+          profile?.availability_defaults as Record<string, string[]> | null | undefined
         )
         availability = { status: autoStatus } as any
       }
