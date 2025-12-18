@@ -578,9 +578,9 @@ export default function HomePage() {
                   </CardContent>
                 </Card>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-4">
                   {teams.map((team) => (
-                    <Link key={team.id} href={`/teams/${team.id}`}>
+                    <Link key={team.id} href={`/teams/${team.id}`} className="block mb-3">
                       <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                         <CardContent className="p-3">
                           <div className="flex items-center justify-between gap-2">

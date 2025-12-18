@@ -90,9 +90,9 @@ export default function TeamsPage() {
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
             {teams.map((team) => (
-              <Link key={team.id} href={`/teams/${team.id}`}>
+              <Link key={team.id} href={`/teams/${team.id}`} className="block mb-4">
                 <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
