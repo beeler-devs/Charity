@@ -34,6 +34,13 @@ export default function TeamDetailPage() {
   const [teamConversationId, setTeamConversationId] = useState<string | null>(null)
   const [pendingInvitesCount, setPendingInvitesCount] = useState(0)
   const [isCaptain, setIsCaptain] = useState(false)
+  const [teamStats, setTeamStats] = useState<{
+    totalMatches: number
+    wins: number
+    losses: number
+    ties: number
+    winPercentage: number
+  } | null>(null)
 
   useEffect(() => {
     loadTeamData()
@@ -133,6 +140,23 @@ export default function TeamDetailPage() {
       }
     }
 
+    // Load team statistics
+    const { data: statsData } = await supabase
+      .from('team_statistics')
+      .select('*')
+      .eq('team_id', teamId)
+      .maybeSingle()
+
+    if (statsData) {
+      setTeamStats({
+        totalMatches: statsData.total_matches,
+        wins: statsData.wins,
+        losses: statsData.losses,
+        ties: statsData.ties,
+        winPercentage: statsData.win_percentage || 0,
+      })
+    }
+
     setLoading(false)
   }
 
@@ -179,6 +203,44 @@ export default function TeamDetailPage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Team Statistics */}
+        {teamStats && teamStats.totalMatches > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">Season Record</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-3xl font-bold">
+                  {teamStats.wins}-{teamStats.losses}
+                  {teamStats.ties > 0 && `-${teamStats.ties}`}
+                </span>
+                <Badge variant="default" className="text-base px-3 py-1">
+                  {teamStats.winPercentage.toFixed(1)}%
+                </Badge>
+              </div>
+              <div className="grid grid-cols-4 gap-2 text-center text-xs pt-2 border-t">
+                <div>
+                  <div className="font-bold text-primary">{teamStats.totalMatches}</div>
+                  <div className="text-muted-foreground">Played</div>
+                </div>
+                <div>
+                  <div className="font-bold text-green-600">{teamStats.wins}</div>
+                  <div className="text-muted-foreground">Won</div>
+                </div>
+                <div>
+                  <div className="font-bold text-red-600">{teamStats.losses}</div>
+                  <div className="text-muted-foreground">Lost</div>
+                </div>
+                <div>
+                  <div className="font-bold text-yellow-600">{teamStats.ties}</div>
+                  <div className="text-muted-foreground">Tied</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Quick Actions */}
         <div className="grid grid-cols-3 gap-3">

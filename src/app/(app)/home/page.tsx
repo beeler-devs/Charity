@@ -59,6 +59,12 @@ export default function HomePage() {
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
   const [rosterMemberMap, setRosterMemberMap] = useState<Record<string, string>>({}) // matchId -> rosterMemberId
+  const [lifetimeStats, setLifetimeStats] = useState<{
+    totalMatches: number
+    wins: number
+    losses: number
+    winPercentage: number
+  } | null>(null)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -259,7 +265,48 @@ export default function HomePage() {
     const nextInLineup = processedMatches.find(m => m.status === 'in_lineup')
     setNextMatch(nextInLineup || processedMatches[0] || null)
     setUpcomingMatches(processedMatches)
+    
+    // Load lifetime statistics
+    await loadLifetimeStats()
+    
     setLoading(false)
+  }
+
+  async function loadLifetimeStats() {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    // Get user's roster memberships first
+    const { data: rosters } = await supabase
+      .from('roster_members')
+      .select('id')
+      .eq('user_id', user.id)
+
+    if (!rosters || rosters.length === 0) return
+
+    const rosterIds = rosters.map(r => r.id)
+
+    // Get all individual statistics for this user's roster memberships
+    const { data: stats } = await supabase
+      .from('individual_statistics')
+      .select('matches_played, matches_won, matches_lost, win_percentage')
+      .in('player_id', rosterIds)
+
+    if (stats && stats.length > 0) {
+      // Aggregate stats across all teams
+      const totalMatches = stats.reduce((sum, s) => sum + s.matches_played, 0)
+      const totalWins = stats.reduce((sum, s) => sum + s.matches_won, 0)
+      const totalLosses = stats.reduce((sum, s) => sum + s.matches_lost, 0)
+      const winPercentage = totalMatches > 0 ? (totalWins / totalMatches * 100) : 0
+
+      setLifetimeStats({
+        totalMatches,
+        wins: totalWins,
+        losses: totalLosses,
+        winPercentage: Math.round(winPercentage * 100) / 100,
+      })
+    }
   }
 
   const getStatusIcon = (status: 'in_lineup' | 'off' | 'pending') => {
@@ -563,6 +610,53 @@ export default function HomePage() {
                 </div>
               )}
             </div>
+
+            {/* Lifetime Statistics */}
+            {lifetimeStats && lifetimeStats.totalMatches > 0 && (
+              <div>
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">
+                  My Stats
+                </h2>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm">Lifetime Performance</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <div className="text-2xl font-bold text-green-600">
+                          {lifetimeStats.wins}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Wins</div>
+                      </div>
+                      <div>
+                        <div className="text-2xl font-bold text-red-600">
+                          {lifetimeStats.losses}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Losses</div>
+                      </div>
+                      <div>
+                        <div className="text-2xl font-bold text-primary">
+                          {lifetimeStats.totalMatches}
+                        </div>
+                        <div className="text-xs text-muted-foreground">Played</div>
+                      </div>
+                    </div>
+                    <div className="pt-2 border-t">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Win Rate</span>
+                        <span className="text-lg font-bold text-primary">
+                          {lifetimeStats.winPercentage.toFixed(1)}%
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">
+                        {lifetimeStats.wins}-{lifetimeStats.losses} record
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
         </div>
       </main>

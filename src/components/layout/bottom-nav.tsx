@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Users, Gamepad2, BookOpen, User, MessageCircle } from 'lucide-react'
+import { Home, Users, Gamepad2, Trophy, User, MessageCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -22,9 +22,9 @@ const navItems = [
     icon: MessageCircle,
   },
   {
-    label: 'Rules',
-    href: '/rules',
-    icon: BookOpen,
+    label: 'History',
+    href: '/match-history',
+    icon: Trophy,
   },
   {
     label: 'Profile',

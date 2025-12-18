@@ -6,9 +6,11 @@ import Link from 'next/link'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { createClient } from '@/lib/supabase/client'
 import { Match } from '@/types/database.types'
 import { formatDate, formatTime } from '@/lib/utils'
+import { MatchResultBadge } from '@/components/matches/match-result-badge'
 import { ChevronRight } from 'lucide-react'
 
 export default function MatchesPage() {
@@ -87,15 +89,20 @@ export default function MatchesPage() {
     <div className="flex flex-col min-h-screen">
       <Header title="All Matches" />
 
-      <main className="flex-1 p-4 space-y-4">
-        {/* Upcoming */}
-        {upcomingMatches.length > 0 && (
-          <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1">
+      <main className="flex-1 p-4">
+        <Tabs defaultValue="upcoming" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-4">
+            <TabsTrigger value="upcoming">
               Upcoming ({upcomingMatches.length})
-            </h2>
-            <div className="space-y-2">
-              {upcomingMatches.map((match) => (
+            </TabsTrigger>
+            <TabsTrigger value="past">
+              Past ({pastMatches.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="upcoming" className="space-y-2">
+            {upcomingMatches.length > 0 ? (
+              upcomingMatches.map((match) => (
                 <Link key={match.id} href={`/teams/${teamId}/matches/${match.id}`}>
                   <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                     <CardContent className="p-3">
@@ -112,27 +119,32 @@ export default function MatchesPage() {
                           <p className="text-xs text-muted-foreground">
                             {formatDate(match.date, 'MMM d, yyyy')} at {formatTime(match.time)}
                           </p>
+                          {match.venue && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {match.venue}
+                            </p>
+                          )}
                         </div>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </CardContent>
                   </Card>
                 </Link>
-              ))}
-            </div>
-          </div>
-        )}
+              ))
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center">
+                  <p className="text-muted-foreground">No upcoming matches</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
 
-        {/* Past */}
-        {pastMatches.length > 0 && (
-          <div className="space-y-2">
-            <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1">
-              Past ({pastMatches.length})
-            </h2>
-            <div className="space-y-2">
-              {pastMatches.map((match) => (
+          <TabsContent value="past" className="space-y-2">
+            {pastMatches.length > 0 ? (
+              pastMatches.map((match) => (
                 <Link key={match.id} href={`/teams/${teamId}/matches/${match.id}`}>
-                  <Card className="hover:bg-accent/50 transition-colors cursor-pointer opacity-60">
+                  <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
@@ -140,36 +152,38 @@ export default function MatchesPage() {
                             <span className="font-medium text-sm">
                               vs {match.opponent_name}
                             </span>
-                            {match.match_result !== 'pending' && (
-                              <Badge
-                                variant={match.match_result === 'win' ? 'success' : 'destructive'}
-                                className="text-xs"
-                              >
-                                {match.match_result?.toUpperCase()}
-                              </Badge>
-                            )}
+                            <MatchResultBadge
+                              result={match.match_result as 'win' | 'loss' | 'tie' | 'pending'}
+                              scoreSummary={match.score_summary || undefined}
+                            />
+                            <Badge variant={match.is_home ? 'default' : 'outline'} className="text-xs">
+                              {match.is_home ? 'Home' : 'Away'}
+                            </Badge>
                           </div>
                           <p className="text-xs text-muted-foreground">
                             {formatDate(match.date, 'MMM d, yyyy')}
                           </p>
+                          {match.venue && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {match.venue}
+                            </p>
+                          )}
                         </div>
                         <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </CardContent>
                   </Card>
                 </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {matches.length === 0 && (
-          <Card>
-            <CardContent className="py-8 text-center">
-              <p className="text-muted-foreground">No matches scheduled</p>
-            </CardContent>
-          </Card>
-        )}
+              ))
+            ) : (
+              <Card>
+                <CardContent className="py-8 text-center">
+                  <p className="text-muted-foreground">No past matches</p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+        </Tabs>
       </main>
     </div>
   )

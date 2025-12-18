@@ -30,8 +30,12 @@ import {
   Circle,
   Mail,
   ClipboardList,
-  Thermometer
+  Thermometer,
+  Trophy
 } from 'lucide-react'
+import { ScoreEntryDialog } from '@/components/matches/score-entry-dialog'
+import { MatchResultBadge } from '@/components/matches/match-result-badge'
+import { formatScoreDisplay } from '@/lib/score-utils'
 
 interface ChecklistItem {
   days: number
@@ -46,6 +50,9 @@ export default function MatchDetailPage() {
   const [match, setMatch] = useState<Match | null>(null)
   const [team, setTeam] = useState<Team | null>(null)
   const [loading, setLoading] = useState(true)
+  const [isCaptain, setIsCaptain] = useState(false)
+  const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
+  const [courtScores, setCourtScores] = useState<any[]>([])
   const { toast } = useToast()
 
   const [warmupStatus, setWarmupStatus] = useState<'booked' | 'none_yet' | 'no_warmup'>('none_yet')
@@ -64,6 +71,9 @@ export default function MatchDetailPage() {
 
   async function loadMatchData() {
     const supabase = createClient()
+
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
 
     const { data: matchData } = await supabase
       .from('matches')
@@ -96,9 +106,64 @@ export default function MatchDetailPage() {
 
     if (teamData) {
       setTeam(teamData)
+      
+      // Check if current user is captain or co-captain
+      if (user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
+        setIsCaptain(true)
+      }
     }
 
+    // Load court-by-court scores if available
+    await loadCourtScores()
+
     setLoading(false)
+  }
+
+  async function loadCourtScores() {
+    const supabase = createClient()
+
+    // Get lineups for this match
+    const { data: lineups } = await supabase
+      .from('lineups')
+      .select(`
+        id,
+        court_slot,
+        player1:roster_members!lineups_player1_id_fkey(full_name),
+        player2:roster_members!lineups_player2_id_fkey(full_name)
+      `)
+      .eq('match_id', matchId)
+      .eq('is_published', true)
+      .order('court_slot', { ascending: true })
+
+    if (!lineups || lineups.length === 0) return
+
+    // Get scores for these lineups
+    const lineupIds = lineups.map(l => l.id)
+    const { data: scores } = await supabase
+      .from('match_scores')
+      .select('*')
+      .in('lineup_id', lineupIds)
+      .order('lineup_id')
+      .order('set_number')
+
+    if (scores && scores.length > 0) {
+      // Group scores by lineup
+      const scoresByLineup = new Map()
+      scores.forEach(score => {
+        const existing = scoresByLineup.get(score.lineup_id) || []
+        scoresByLineup.set(score.lineup_id, [...existing, score])
+      })
+
+      // Combine lineups with their scores
+      const courtsWithScores = lineups.map(lineup => ({
+        court_slot: lineup.court_slot,
+        player1: lineup.player1,
+        player2: lineup.player2,
+        scores: scoresByLineup.get(lineup.id) || [],
+      }))
+
+      setCourtScores(courtsWithScores)
+    }
   }
 
   async function updateWarmup() {
@@ -171,6 +236,18 @@ Thank you`)
     return `mailto:${match.opponent_captain_email || ''}?subject=${subject}&body=${body}`
   }
 
+  function canEnterScores(): boolean {
+    if (!isCaptain || !match) return false
+    
+    // Can only enter scores on or after match date
+    const matchDate = new Date(match.date)
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    matchDate.setHours(0, 0, 0, 0)
+    
+    return matchDate <= today
+  }
+
   if (loading || !match) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -189,9 +266,15 @@ Thank you`)
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">vs {match.opponent_name}</h2>
-              <Badge variant={match.is_home ? 'default' : 'outline'}>
-                {match.is_home ? 'Home' : 'Away'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <MatchResultBadge 
+                  result={match.match_result as 'win' | 'loss' | 'tie' | 'pending'}
+                  scoreSummary={match.score_summary || undefined}
+                />
+                <Badge variant={match.is_home ? 'default' : 'outline'}>
+                  {match.is_home ? 'Home' : 'Away'}
+                </Badge>
+              </div>
             </div>
             <div className="space-y-2 text-sm">
               <div className="flex items-center gap-2">
@@ -233,6 +316,43 @@ Thank you`)
             </Button>
           </Link>
         </div>
+
+        {/* Score Entry (Captains Only) */}
+        {canEnterScores() && (
+          <Button
+            className="w-full"
+            onClick={() => setScoreDialogOpen(true)}
+          >
+            <Trophy className="h-4 w-4 mr-2" />
+            {match.match_result === 'pending' ? 'Enter Scores' : 'Edit Scores'}
+          </Button>
+        )}
+
+        {/* Court-by-Court Scores */}
+        {courtScores.length > 0 && (
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm">Court-by-Court Results</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-2">
+              <div className="space-y-3">
+                {courtScores.map((court) => (
+                  <div key={court.court_slot} className="border-b last:border-b-0 pb-3 last:pb-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-semibold">Court {court.court_slot}</span>
+                      <span className="text-sm text-muted-foreground">
+                        {formatScoreDisplay(court.scores)}
+                      </span>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {court.player1?.full_name} + {court.player2?.full_name}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Warm-Up Wizard */}
         <Card>
@@ -333,6 +453,20 @@ Thank you`)
           </CardContent>
         </Card>
       </main>
+
+      {/* Score Entry Dialog */}
+      {team && (
+        <ScoreEntryDialog
+          open={scoreDialogOpen}
+          onOpenChange={setScoreDialogOpen}
+          matchId={matchId}
+          teamId={teamId}
+          leagueFormat={(team.league_format as 'CUP' | 'USTA' | 'FLEX') || 'USTA'}
+          onScoresSaved={() => {
+            loadMatchData()
+          }}
+        />
+      )}
     </div>
   )
 }

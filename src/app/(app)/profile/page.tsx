@@ -35,6 +35,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [availabilityDefaults, setAvailabilityDefaults] = useState<Record<string, boolean>>({})
+  const [statistics, setStatistics] = useState<any[]>([])
   const { toast } = useToast()
 
   // Form state
@@ -81,6 +82,33 @@ export default function ProfilePage() {
 
     if (reservationsData) {
       setReservations(reservationsData)
+    }
+
+    // Load individual statistics
+    const { data: rosters } = await supabase
+      .from('roster_members')
+      .select('id, team_id, teams(name)')
+      .eq('user_id', user.id)
+
+    if (rosters && rosters.length > 0) {
+      const rosterIds = rosters.map(r => r.id)
+      
+      const { data: statsData } = await supabase
+        .from('individual_statistics')
+        .select('*')
+        .in('player_id', rosterIds)
+
+      if (statsData) {
+        // Combine stats with team names
+        const statsWithTeams = statsData.map(stat => {
+          const roster = rosters.find(r => r.id === stat.player_id)
+          return {
+            ...stat,
+            team_name: roster?.teams?.name || 'Unknown Team',
+          }
+        })
+        setStatistics(statsWithTeams)
+      }
     }
 
     setLoading(false)
@@ -212,6 +240,94 @@ export default function ProfilePage() {
             </div>
           </CardContent>
         </Card>
+
+        {/* My Statistics */}
+        {statistics.length > 0 && (
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-sm">My Statistics</CardTitle>
+            </CardHeader>
+            <CardContent className="p-4 pt-2">
+              <div className="space-y-4">
+                {statistics.map((stat) => (
+                  <div key={stat.id} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{stat.team_name}</span>
+                      <Badge variant="outline">
+                        {stat.win_percentage?.toFixed(1)}% Win Rate
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div>
+                        <div className="font-bold text-primary">{stat.matches_played}</div>
+                        <div className="text-muted-foreground">Played</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-green-600">{stat.matches_won}</div>
+                        <div className="text-muted-foreground">Won</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-red-600">{stat.matches_lost}</div>
+                        <div className="text-muted-foreground">Lost</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-blue-600">{stat.games_won}/{stat.games_won + stat.games_lost}</div>
+                        <div className="text-muted-foreground">Games</div>
+                      </div>
+                    </div>
+                    {statistics.length > 1 && stat !== statistics[statistics.length - 1] && (
+                      <div className="border-b mt-3" />
+                    )}
+                  </div>
+                ))}
+                
+                {/* Overall totals */}
+                {statistics.length > 1 && (
+                  <div className="pt-3 border-t">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold">Overall</span>
+                      <Badge>
+                        {(
+                          (statistics.reduce((sum, s) => sum + s.matches_won, 0) /
+                            statistics.reduce((sum, s) => sum + s.matches_played, 0)) *
+                          100
+                        ).toFixed(1)}
+                        % Win Rate
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div>
+                        <div className="font-bold text-primary">
+                          {statistics.reduce((sum, s) => sum + s.matches_played, 0)}
+                        </div>
+                        <div className="text-muted-foreground">Played</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-green-600">
+                          {statistics.reduce((sum, s) => sum + s.matches_won, 0)}
+                        </div>
+                        <div className="text-muted-foreground">Won</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-red-600">
+                          {statistics.reduce((sum, s) => sum + s.matches_lost, 0)}
+                        </div>
+                        <div className="text-muted-foreground">Lost</div>
+                      </div>
+                      <div>
+                        <div className="font-bold text-blue-600">
+                          {statistics.reduce((sum, s) => sum + s.games_won, 0)}/
+                          {statistics.reduce((sum, s) => sum + s.games_won + s.games_lost, 0)}
+                        </div>
+                        <div className="text-muted-foreground">Games</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Master Availability */}
         <Link href="/settings/availability">
