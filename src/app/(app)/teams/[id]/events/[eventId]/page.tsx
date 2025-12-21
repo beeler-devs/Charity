@@ -40,6 +40,16 @@ import {
 } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 
 interface AttendeeInfo {
   rosterMember: RosterMember
@@ -58,6 +68,7 @@ export default function EventDetailPage() {
   const [isEditing, setIsEditing] = useState(false)
   const [editedEvent, setEditedEvent] = useState<Partial<Event>>({})
   const [saving, setSaving] = useState(false)
+  const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [myAvailability, setMyAvailability] = useState<Availability | null>(null)
   const [myRosterMemberId, setMyRosterMemberId] = useState<string | null>(null)
   const [attendees, setAttendees] = useState<{
@@ -193,11 +204,7 @@ export default function EventDetailPage() {
     }
   }
 
-  async function handleDelete() {
-    if (!confirm('Are you sure you want to delete this event? This action cannot be undone.')) {
-      return
-    }
-
+  async function handleDeleteConfirm() {
     const supabase = createClient()
 
     const { error } = await supabase
@@ -211,12 +218,15 @@ export default function EventDetailPage() {
         description: error.message,
         variant: 'destructive',
       })
+      setShowDeleteAlert(false)
     } else {
       toast({
         title: 'Event deleted',
         description: 'The event has been deleted successfully',
       })
-      router.push(`/teams/${teamId}`)
+      setShowDeleteAlert(false)
+      // Navigate back to previous page (calendar, teams page, etc.)
+      router.back()
     }
   }
 
@@ -371,7 +381,8 @@ export default function EventDetailPage() {
       })
       setIsEditing(false)
       setSaving(false)
-      loadEventData()
+      // Navigate back to previous page (calendar, teams page, etc.)
+      router.back()
     }
   }
 
@@ -548,6 +559,17 @@ export default function EventDetailPage() {
                   <XCircle className="h-4 w-4 mr-2" />
                   Cancel
                 </Button>
+                {isCaptain && (
+                  <Button
+                    onClick={() => setShowDeleteAlert(true)}
+                    variant="destructive"
+                    disabled={saving}
+                    className="flex-1"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>
@@ -625,7 +647,7 @@ export default function EventDetailPage() {
             <Button
               variant="destructive"
               className="flex-1"
-              onClick={handleDelete}
+              onClick={() => setShowDeleteAlert(true)}
             >
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Event
@@ -796,6 +818,27 @@ export default function EventDetailPage() {
           }}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Event?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete <strong>{event?.event_name}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Delete Event
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

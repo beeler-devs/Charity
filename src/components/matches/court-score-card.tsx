@@ -95,7 +95,8 @@ export function CourtScoreCard({
     }
     
     onChange(lineupId, scores)
-  }, [set1Home, set1Away, set2Home, set2Away, set3Home, set3Away, set1Tiebreak, set2Tiebreak, set3Tiebreak, mode, lineupId, onChange])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [set1Home, set1Away, set2Home, set2Away, set3Home, set3Away, set1Tiebreak, set2Tiebreak, set3Tiebreak, mode, lineupId])
 
   // Calculate current winner
   const getSetWinner = (home: string, away: string) => {

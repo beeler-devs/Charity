@@ -55,15 +55,24 @@ export function CalendarItemTile({ item, compact = false, showDate = false }: Ca
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
-            <Badge 
-              variant={item.type === 'match' ? 'default' : 'secondary'} 
-              className={cn(
-                "text-[10px] px-1 py-0 h-4",
-                item.type === 'event' && item.eventType && getEventTypeBadgeClass(item.eventType)
-              )}
-            >
-              {item.type === 'match' ? 'Match' : (item.eventType ? getEventTypeLabel(item.eventType) : 'Event')}
-            </Badge>
+            {item.type === 'match' ? (
+              <Badge 
+                variant="default" 
+                className="text-[10px] px-1 py-0 h-4"
+              >
+                Match
+              </Badge>
+            ) : item.eventType ? (
+              <Badge 
+                variant="secondary" 
+                className={cn(
+                  "text-[10px] px-1 py-0 h-4",
+                  getEventTypeBadgeClass(item.eventType)
+                )}
+              >
+                {getEventTypeLabel(item.eventType)}
+              </Badge>
+            ) : null}
             {getAvailabilityIcon()}
           </div>
           

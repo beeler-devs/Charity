@@ -36,9 +36,20 @@ import {
   Save,
   XCircle,
   Loader2,
-  Timer
+  Timer,
+  Trash2
 } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { ScoreEntryDialog } from '@/components/matches/score-entry-dialog'
 import { MatchResultBadge } from '@/components/matches/match-result-badge'
 import { formatScoreDisplay } from '@/lib/score-utils'
@@ -61,6 +72,7 @@ export default function MatchDetailPage() {
   const [isEditing, setIsEditing] = useState(false)
   const [editedMatch, setEditedMatch] = useState<Partial<Match>>({})
   const [saving, setSaving] = useState(false)
+  const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
   const [courtScores, setCourtScores] = useState<any[]>([])
   const { toast } = useToast()
@@ -350,6 +362,32 @@ Thank you`)
     }
   }
 
+  async function handleDeleteConfirm() {
+    const supabase = createClient()
+
+    const { error } = await supabase
+      .from('matches')
+      .delete()
+      .eq('id', matchId)
+
+    if (error) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive',
+      })
+      setShowDeleteAlert(false)
+    } else {
+      toast({
+        title: 'Match deleted',
+        description: 'The match has been deleted successfully',
+      })
+      setShowDeleteAlert(false)
+      // Navigate back to previous page (calendar, teams page, etc.)
+      router.back()
+    }
+  }
+
   if (loading || !match) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -544,6 +582,17 @@ Thank you`)
                   <XCircle className="h-4 w-4 mr-2" />
                   Cancel
                 </Button>
+                {isCaptain && (
+                  <Button
+                    onClick={() => setShowDeleteAlert(true)}
+                    variant="destructive"
+                    disabled={saving}
+                    className="flex-1"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete
+                  </Button>
+                )}
               </div>
             )}
           </CardContent>
@@ -567,13 +616,22 @@ Thank you`)
 
         {/* Score Entry (Captains Only) */}
         {canEnterScores() && (
-          <Button
-            className="w-full"
-            onClick={() => setScoreDialogOpen(true)}
-          >
-            <Trophy className="h-4 w-4 mr-2" />
-            {match.match_result === 'pending' ? 'Enter Scores' : 'Edit Scores'}
-          </Button>
+          <div className="space-y-2">
+            <Link href={`/teams/${teamId}/matches/${matchId}/enter-scores`} className="block">
+              <Button className="w-full" variant="default">
+                <Trophy className="h-4 w-4 mr-2" />
+                Enter Scores (Full Interface)
+              </Button>
+            </Link>
+            <Button
+              className="w-full"
+              variant="outline"
+              onClick={() => setScoreDialogOpen(true)}
+            >
+              <Trophy className="h-4 w-4 mr-2" />
+              {match.match_result === 'pending' ? 'Quick Score Entry' : 'Edit Scores'}
+            </Button>
+          </div>
         )}
 
         {/* Court-by-Court Scores */}
@@ -715,6 +773,27 @@ Thank you`)
           }}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Match?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the match vs <strong>{match?.opponent_name}</strong>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              Delete Match
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
