@@ -56,11 +56,22 @@ export default function ProfilePage() {
       return
     }
 
-    const { data: profileData } = await supabase
+    const { data: profileData, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', user.id)
       .single()
+
+    if (profileError) {
+      console.error('Error loading profile:', profileError)
+      toast({
+        title: 'Error loading profile',
+        description: profileError.message || 'Unable to load your profile. Please refresh the page.',
+        variant: 'destructive',
+      })
+      setLoading(false)
+      return
+    }
 
     if (profileData) {
       setProfile(profileData)
@@ -70,6 +81,12 @@ export default function ProfilePage() {
       setAvailabilityDefaults(
         (profileData.availability_defaults as Record<string, boolean>) || {}
       )
+    } else {
+      toast({
+        title: 'Profile not found',
+        description: 'Your profile could not be loaded. Please contact support.',
+        variant: 'destructive',
+      })
     }
 
     const { data: reservationsData } = await supabase

@@ -39,7 +39,13 @@ export function useIsSystemAdmin() {
             console.warn('Could not check system admin status (this is OK if RLS policies need setup):', error.message)
             setIsAdmin(false)
           } else {
-            setIsAdmin(profile?.is_system_admin === true)
+            const adminStatus = profile?.is_system_admin === true
+            console.log('System admin check result:', {
+              userId: user.id,
+              isSystemAdmin: adminStatus,
+              profileData: profile
+            })
+            setIsAdmin(adminStatus)
           }
         } catch (profileError: any) {
           // Catch any unexpected errors from the profile query

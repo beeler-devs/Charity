@@ -70,7 +70,49 @@ export default function HomePage() {
 
   useEffect(() => {
     loadDashboardData()
+    // Check and link roster members on first load (in case they were added before account creation)
+    linkRosterMembersIfNeeded()
   }, [])
+
+  async function linkRosterMembersIfNeeded() {
+    try {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      
+      if (!user) return
+
+      // Check if user has any roster memberships
+      const { data: existingRosters } = await supabase
+        .from('roster_members')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
+        .limit(1)
+
+      // If user already has roster memberships, no need to check
+      if (existingRosters && existingRosters.length > 0) {
+        return
+      }
+
+      // User has no roster memberships, try to link via API
+      const response = await fetch('/api/auth/link-roster-members', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })
+
+      const data = await response.json()
+      
+      if (data.success && data.linked > 0) {
+        // Refresh the page to show the new teams
+        window.location.reload()
+      }
+    } catch (error) {
+      // Silently fail - this is a background check
+      console.warn('Error checking for unlinked roster members:', error)
+    }
+  }
 
   async function loadDashboardData() {
     const supabase = createClient()
