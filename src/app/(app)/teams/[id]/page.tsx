@@ -356,7 +356,7 @@ export default function TeamDetailPage() {
                           </Badge>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          {formatDate(match.date, 'MMM d')} at {formatTime(match.time)}
+                          {formatDate(match.date, 'EEE, MMM d')} {formatTime(match.time).toLowerCase()}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -421,7 +421,7 @@ export default function TeamDetailPage() {
                           </Badge>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          {formatDate(event.date, 'MMM d')} at {formatTime(event.time)}
+                          {formatDate(event.date, 'EEE, MMM d')} {formatTime(event.time).toLowerCase()}
                         </p>
                         {event.location && (
                           <p className="text-xs text-muted-foreground mt-1">
