@@ -11,6 +11,7 @@ import { createClient } from '@/lib/supabase/client'
 import { Event, RosterMember, Availability } from '@/types/database.types'
 import { formatDate, formatTime } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { EditEventDialog } from '@/components/teams/edit-event-dialog'
 import {
   Select,
   SelectContent,
@@ -45,6 +46,7 @@ export default function EventDetailPage() {
   const [event, setEvent] = useState<Event | null>(null)
   const [loading, setLoading] = useState(true)
   const [isCaptain, setIsCaptain] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
   const [myAvailability, setMyAvailability] = useState<Availability | null>(null)
   const [myRosterMemberId, setMyRosterMemberId] = useState<string | null>(null)
   const [attendees, setAttendees] = useState<{
@@ -75,6 +77,9 @@ export default function EventDetailPage() {
       .select('*')
       .eq('id', eventId)
       .single()
+    
+    // Note: recurrence_series_id and other recurrence fields may not exist in DB yet
+    // They will be added via migration, but the code handles their absence gracefully
 
     if (eventData) {
       setEvent(eventData)
@@ -376,6 +381,14 @@ export default function EventDetailPage() {
         {isCaptain && (
           <div className="flex gap-3">
             <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => setShowEditDialog(true)}
+            >
+              <Edit className="h-4 w-4 mr-2" />
+              Edit Event
+            </Button>
+            <Button
               variant="destructive"
               className="flex-1"
               onClick={handleDelete}
@@ -519,6 +532,20 @@ export default function EventDetailPage() {
           </Card>
         )}
       </main>
+
+      {/* Edit Event Dialog */}
+      {event && (
+        <EditEventDialog
+          open={showEditDialog}
+          onOpenChange={setShowEditDialog}
+          event={event}
+          teamId={teamId}
+          onUpdated={() => {
+            loadEventData()
+            setShowEditDialog(false)
+          }}
+        />
+      )}
     </div>
   )
 }

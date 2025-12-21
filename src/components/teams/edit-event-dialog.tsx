@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,21 +24,24 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2 } from 'lucide-react'
-import { addDays, addWeeks, format, parseISO } from 'date-fns'
+import { addDays, addWeeks, format, parseISO, isBefore, isAfter } from 'date-fns'
+import { Event } from '@/types/database.types'
 
-interface AddEventDialogProps {
+interface EditEventDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  event: Event | null
   teamId: string
-  onAdded: () => void
+  onUpdated: () => void
 }
 
-export function AddEventDialog({
+export function EditEventDialog({
   open,
   onOpenChange,
+  event,
   teamId,
-  onAdded,
-}: AddEventDialogProps) {
+  onUpdated,
+}: EditEventDialogProps) {
   const [eventName, setEventName] = useState('')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
@@ -49,26 +52,64 @@ export function AddEventDialog({
   const [endType, setEndType] = useState<'date' | 'occurrences'>('date')
   const [endDate, setEndDate] = useState('')
   const [occurrences, setOccurrences] = useState('')
+  const [editScope, setEditScope] = useState<'series' | 'single'>('series')
+  const [seriesEvents, setSeriesEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
 
-  function resetForm() {
-    setEventName('')
-    setDate('')
-    setTime('')
-    setLocation('')
-    setDescription('')
-    setIsRecurring(false)
-    setRecurrencePattern('weekly')
-    setEndType('date')
-    setEndDate('')
-    setOccurrences('')
+  useEffect(() => {
+    if (event && open) {
+      setEventName(event.event_name || '')
+      setDate(event.date || '')
+      setTime(event.time || '')
+      setLocation(event.location || '')
+      setDescription(event.description || '')
+      
+      // Check if this is part of a recurring series
+      const hasSeriesId = (event as any).recurrence_series_id
+      setIsRecurring(!!hasSeriesId)
+      
+      if (hasSeriesId) {
+        setRecurrencePattern((event as any).recurrence_pattern || 'weekly')
+        setEndType((event as any).recurrence_end_date ? 'date' : 'occurrences')
+        setEndDate((event as any).recurrence_end_date || '')
+        setOccurrences((event as any).recurrence_occurrences?.toString() || '')
+        loadSeriesEvents((event as any).recurrence_series_id)
+        
+        // Determine if event has passed
+        const eventDate = parseISO(event.date)
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        if (isBefore(eventDate, today)) {
+          setEditScope('series') // Default to series if event passed
+        }
+      }
+    }
+  }, [event, open])
+
+  async function loadSeriesEvents(seriesId: string) {
+    if (!seriesId) return
+    
+    const supabase = createClient()
+    // Note: recurrence_series_id may not exist in DB schema yet
+    // This query will fail gracefully if the column doesn't exist
+    const { data, error } = await supabase
+      .from('events')
+      .select('*')
+      .eq('recurrence_series_id', seriesId)
+      .order('date', { ascending: true })
+    
+    if (error) {
+      // Column doesn't exist yet - this is expected until migration is run
+      console.warn('recurrence_series_id column not found:', error.message)
+      setSeriesEvents([])
+    } else if (data) {
+      setSeriesEvents(data)
+    }
   }
 
   function generateRecurringDates(startDate: string, pattern: 'daily' | 'weekly' | 'custom', endDateStr?: string, numOccurrences?: number): string[] {
     const dates: string[] = [startDate]
-    // Parse the date string properly to avoid timezone issues
-    // parseISO handles 'yyyy-MM-dd' format correctly in local time
     const start = parseISO(startDate)
     let current = new Date(start)
     let count = 1
@@ -81,7 +122,6 @@ export function AddEventDialog({
         } else if (pattern === 'weekly') {
           current = addWeeks(current, 1)
         }
-        // For custom, we'll handle separately if needed
         if (current <= end) {
           dates.push(format(current, 'yyyy-MM-dd'))
         }
@@ -138,7 +178,7 @@ export function AddEventDialog({
         })
         return
       }
-      if (endType === 'date' && new Date(endDate) < new Date(date)) {
+      if (endType === 'date' && isBefore(parseISO(endDate), parseISO(date))) {
         toast({
           title: 'Error',
           description: 'End date must be after the start date',
@@ -153,7 +193,6 @@ export function AddEventDialog({
     try {
       const supabase = createClient()
 
-      // Verify user has permission (is captain)
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         toast({
@@ -174,85 +213,113 @@ export function AddEventDialog({
       if (!teamData || (teamData.captain_id !== user.id && teamData.co_captain_id !== user.id)) {
         toast({
           title: 'Permission denied',
-          description: 'Only team captains can create events',
+          description: 'Only team captains can edit events',
           variant: 'destructive',
         })
         setLoading(false)
         return
       }
 
-      // Generate dates for recurring events
-      const dates = isRecurring
-        ? generateRecurringDates(
+      if (!event) {
+        setLoading(false)
+        return
+      }
+
+      const eventDate = parseISO(event.date)
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const isPastEvent = isBefore(eventDate, today)
+
+      if (editScope === 'single' || !isRecurring) {
+        // Edit single event only
+        const { error } = await supabase
+          .from('events')
+          .update({
+            event_name: eventName,
             date,
-            recurrencePattern,
-            endType === 'date' ? endDate : undefined,
-            endType === 'occurrences' ? parseInt(occurrences) : undefined
-          )
-        : [date]
+            time,
+            location: location || null,
+            description: description || null,
+          })
+          .eq('id', event.id)
 
-      // Generate a unique series ID for recurring events
-      const recurrenceSeriesId = isRecurring ? crypto.randomUUID() : null
+        if (error) {
+          toast({
+            title: 'Error',
+            description: error.message,
+            variant: 'destructive',
+          })
+        } else {
+          toast({
+            title: 'Event updated',
+            description: 'The event has been updated successfully',
+          })
+          onUpdated()
+          onOpenChange(false)
+        }
+      } else {
+        // Edit recurring series
+        const seriesId = (event as any).recurrence_series_id || crypto.randomUUID()
+        
+        // Get all future events in the series (including current event if not past)
+        const futureEvents = seriesEvents.filter(e => {
+          const eDate = parseISO(e.date)
+          return !isBefore(eDate, today) || e.id === event.id
+        })
 
-      // Create events for each date
-      // Build event objects conditionally based on whether recurrence columns exist
-      const eventsToCreate = dates.map((eventDate, index) => {
-        const baseEvent: any = {
+        // Generate new dates based on updated recurrence settings
+        const dates = generateRecurringDates(
+          date,
+          recurrencePattern,
+          endType === 'date' ? endDate : undefined,
+          endType === 'occurrences' ? parseInt(occurrences) : undefined
+        )
+
+        // Delete all future events in the series
+        const futureEventIds = futureEvents.map(e => e.id)
+        if (futureEventIds.length > 0) {
+          await supabase
+            .from('events')
+            .delete()
+            .in('id', futureEventIds)
+        }
+
+        // Create new events with updated information
+        const eventsToCreate = dates.map(eventDate => ({
           team_id: teamId,
           event_name: eventName,
           date: eventDate,
           time,
           location: location || null,
           description: description || null,
-        }
+          recurrence_series_id: seriesId,
+          recurrence_original_date: date,
+          recurrence_pattern: recurrencePattern,
+          recurrence_end_date: endType === 'date' ? endDate : null,
+          recurrence_occurrences: endType === 'occurrences' ? parseInt(occurrences) : null,
+        }))
 
-        // Only add recurrence fields if this is a recurring event
-        // These fields may not exist in the database schema yet
-        if (isRecurring && recurrenceSeriesId) {
-          baseEvent.recurrence_series_id = recurrenceSeriesId
-          baseEvent.recurrence_original_date = date
-          baseEvent.recurrence_pattern = recurrencePattern
-          if (endType === 'date') {
-            baseEvent.recurrence_end_date = endDate
-          } else {
-            baseEvent.recurrence_occurrences = parseInt(occurrences)
-          }
-        }
+        const { error } = await supabase.from('events').insert(eventsToCreate)
 
-        return baseEvent
-      })
-
-      const { error } = await supabase.from('events').insert(eventsToCreate)
-
-      if (error) {
-        // Check if error is due to missing recurrence columns
-        if (error.message.includes('recurrence') || error.message.includes('schema cache')) {
-          toast({
-            title: 'Migration Required',
-            description: 'Please run the recurring_events_migration.sql migration in your Supabase SQL Editor, then refresh your schema cache.',
-            variant: 'destructive',
-          })
-        } else {
+        if (error) {
           toast({
             title: 'Error',
             description: error.message,
             variant: 'destructive',
           })
+        } else {
+          toast({
+            title: 'Recurring series updated',
+            description: `${dates.length} event${dates.length > 1 ? 's' : ''} have been updated successfully`,
+          })
+          onUpdated()
+          onOpenChange(false)
         }
-      } else {
-        toast({
-          title: isRecurring ? 'Recurring events created' : 'Event created',
-          description: isRecurring 
-            ? `${dates.length} event${dates.length > 1 ? 's' : ''} have been created successfully`
-            : 'The event has been added successfully',
-        })
-        resetForm()
-        onAdded()
       }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to create event',
+        description: 'Failed to update event',
         variant: 'destructive',
       })
     }
@@ -260,17 +327,48 @@ export function AddEventDialog({
     setLoading(false)
   }
 
+  const isPartOfSeries = isRecurring && seriesEvents.length > 1
+  const eventDate = event ? parseISO(event.date) : null
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const isPastEvent = eventDate ? isBefore(eventDate, today) : false
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add Event</DialogTitle>
+          <DialogTitle>Edit Event</DialogTitle>
           <DialogDescription>
-            Create a team event like a practice, dinner, or social gathering
+            {isPartOfSeries && !isPastEvent
+              ? 'Update this event or all future events in the series'
+              : 'Update event details'}
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          {/* Edit Scope Selection (only for recurring series with future events) */}
+          {isPartOfSeries && !isPastEvent && (
+            <div className="space-y-3 p-4 bg-muted rounded-lg">
+              <Label>Edit Options</Label>
+              <Select value={editScope} onValueChange={(value) => setEditScope(value as 'series' | 'single')}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="series">
+                    All future events in this series ({seriesEvents.filter(e => {
+                      const eDate = parseISO(e.date)
+                      return !isBefore(eDate, today) || e.id === event?.id
+                    }).length} events)
+                  </SelectItem>
+                  <SelectItem value="single">
+                    This event only
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Event Name */}
           <div className="space-y-2">
             <Label htmlFor="eventName">
@@ -373,20 +471,21 @@ export function AddEventDialog({
             />
           </div>
 
-          {/* Recurring Event Options */}
-          <div className="space-y-4 pt-4 border-t">
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="isRecurring"
-                checked={isRecurring}
-                onCheckedChange={(checked) => setIsRecurring(checked === true)}
-              />
-              <Label htmlFor="isRecurring" className="font-normal cursor-pointer">
-                This is a recurring event
-              </Label>
-            </div>
+          {/* Recurring Event Options (only shown when editing series) */}
+          {editScope === 'series' && isRecurring && (
+            <div className="space-y-4 pt-4 border-t">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="isRecurring"
+                  checked={isRecurring}
+                  onCheckedChange={(checked) => setIsRecurring(checked === true)}
+                  disabled
+                />
+                <Label htmlFor="isRecurring" className="font-normal cursor-pointer">
+                  This is a recurring event
+                </Label>
+              </div>
 
-            {isRecurring && (
               <div className="space-y-4 pl-6 border-l-2">
                 {/* Recurrence Pattern */}
                 <div className="space-y-2">
@@ -463,8 +562,8 @@ export function AddEventDialog({
                   </div>
                 )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <DialogFooter>
             <Button
@@ -476,7 +575,7 @@ export function AddEventDialog({
             </Button>
             <Button type="submit" disabled={loading}>
               {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create Event
+              Update Event
             </Button>
           </DialogFooter>
         </form>
