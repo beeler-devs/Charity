@@ -212,3 +212,4 @@ CREATE TRIGGER update_conversation_trigger
 ALTER PUBLICATION supabase_realtime ADD TABLE messages;
 ALTER PUBLICATION supabase_realtime ADD TABLE conversations;
 
+

@@ -226,3 +226,4 @@ ALTER TABLE availability ADD CONSTRAINT availability_match_or_event_check
 
 If you need to rollback this feature, see the commented rollback instructions at the bottom of `events_migration.sql`.
 
+

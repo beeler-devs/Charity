@@ -123,3 +123,4 @@ CREATE TRIGGER handle_invitation_acceptance_trigger
   FOR EACH ROW
   EXECUTE FUNCTION handle_invitation_acceptance();
 
+
