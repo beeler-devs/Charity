@@ -2,13 +2,15 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, MessageCircle, Users } from 'lucide-react'
+import Link from 'next/link'
+import { Bell, MessageCircle, Users, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { createClient } from '@/lib/supabase/client'
 import { formatDistanceToNow } from 'date-fns'
+import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
 
 interface HeaderProps {
   title: string
@@ -33,6 +35,7 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
   const [loading, setLoading] = useState(false)
   const openRef = useRef(false)
   const router = useRouter()
+  const { isAdmin } = useIsSystemAdmin()
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -298,7 +301,15 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 safe-area-inset-top">
       <div className="flex h-14 items-center justify-between px-4">
         <h1 className="text-lg font-semibold">{title}</h1>
-        {showNotifications && (
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <Link href="/admin">
+              <Button variant="ghost" size="icon" title="System Admin">
+                <Settings className="h-5 w-5" />
+              </Button>
+            </Link>
+          )}
+          {showNotifications && (
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
               <Button variant="ghost" size="icon" className="relative">
@@ -376,7 +387,8 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
               </ScrollArea>
             </PopoverContent>
           </Popover>
-        )}
+          )}
+        </div>
       </div>
     </header>
   )

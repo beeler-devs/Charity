@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,10 +23,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Plus } from 'lucide-react'
 import { addDays, addWeeks, format, parseISO } from 'date-fns'
 import { getEventTypes } from '@/lib/event-type-colors'
 import { EventType } from '@/lib/calendar-utils'
+import { VenueDialog } from '@/components/teams/venue-dialog'
 
 interface AddEventDialogProps {
   open: boolean
@@ -54,7 +55,68 @@ export function AddEventDialog({
   const [endDate, setEndDate] = useState('')
   const [occurrences, setOccurrences] = useState('')
   const [loading, setLoading] = useState(false)
+  const [venues, setVenues] = useState<any[]>([])
+  const [selectedVenueId, setSelectedVenueId] = useState<string | undefined>(undefined)
+  const [locationMode, setLocationMode] = useState<'venue' | 'custom'>('venue')
+  const [showVenueDialog, setShowVenueDialog] = useState(false)
+  const [isCaptain, setIsCaptain] = useState(false)
   const { toast } = useToast()
+
+  useEffect(() => {
+    if (open) {
+      loadVenues()
+      checkCaptainStatus()
+    }
+  }, [open, teamId])
+
+  async function checkCaptainStatus() {
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      setIsCaptain(false)
+      return
+    }
+
+    const { data: teamData } = await supabase
+      .from('teams')
+      .select('captain_id, co_captain_id')
+      .eq('id', teamId)
+      .single()
+
+    if (teamData && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
+      setIsCaptain(true)
+    } else {
+      setIsCaptain(false)
+    }
+  }
+
+  async function loadVenues() {
+    const supabase = createClient()
+    
+    // Load system-wide active venues (available to all authenticated users)
+    const { data: systemVenues } = await supabase
+      .from('venues')
+      .select('*')
+      .is('team_id', null)
+      .eq('is_active', true)
+      .order('region', { ascending: true, nullsFirst: false })
+      .order('name', { ascending: true })
+
+    // Load team-specific venues (available to all team members)
+    const { data: teamVenues } = await supabase
+      .from('venues')
+      .select('*')
+      .eq('team_id', teamId)
+      .order('name', { ascending: true })
+
+    const allVenues = [
+      ...(systemVenues || []),
+      ...(teamVenues || [])
+    ]
+
+    setVenues(allVenues)
+  }
 
   function resetForm() {
     setEventName('')
@@ -69,6 +131,8 @@ export function AddEventDialog({
     setEndType('date')
     setEndDate('')
     setOccurrences('')
+    setSelectedVenueId(undefined)
+    setLocationMode('venue')
   }
 
   function generateRecurringDates(startDate: string, pattern: 'daily' | 'weekly' | 'custom', endDateStr?: string, numOccurrences?: number): string[] {
@@ -394,13 +458,105 @@ export function AddEventDialog({
 
           {/* Location */}
           <div className="space-y-2">
-            <Label htmlFor="location">Location</Label>
-            <Input
-              id="location"
-              placeholder="Court name, restaurant, etc."
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            />
+            <div className="flex items-center justify-between">
+              <Label htmlFor="location">Location</Label>
+              <div className="flex items-center gap-2">
+                <Select value={locationMode} onValueChange={(v) => {
+                  setLocationMode(v as 'venue' | 'custom')
+                  if (v === 'custom') {
+                    setSelectedVenueId(undefined)
+                    setLocation('')
+                  } else {
+                    setLocation('')
+                    setSelectedVenueId(undefined)
+                  }
+                }}>
+                  <SelectTrigger className="w-32">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="venue">Select Venue</SelectItem>
+                    <SelectItem value="custom">Custom Location</SelectItem>
+                  </SelectContent>
+                </Select>
+                {locationMode === 'venue' && isCaptain && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowVenueDialog(true)}
+                    title="Create a new team-specific venue"
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    New
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {locationMode === 'venue' ? (
+              <Select
+                value={selectedVenueId || undefined}
+                onValueChange={(venueId) => {
+                  setSelectedVenueId(venueId)
+                  const venue = venues.find(v => v.id === venueId)
+                  if (venue) {
+                    // Set location to venue name, optionally include address
+                    setLocation(venue.address ? `${venue.name} - ${venue.address}` : venue.name)
+                  }
+                }}
+              >
+                <SelectTrigger id="location">
+                  <SelectValue placeholder="Select a venue..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {venues.length === 0 ? (
+                    <div className="px-2 py-1.5 text-sm text-muted-foreground text-center">
+                      No venues available
+                    </div>
+                  ) : (
+                    <>
+                      {venues.filter(v => !v.team_id).length > 0 && (
+                        <>
+                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                            System Venues
+                          </div>
+                          {venues
+                            .filter(v => !v.team_id)
+                            .map((venue) => (
+                              <SelectItem key={venue.id} value={venue.id}>
+                                {venue.name}
+                                {venue.region && ` (${venue.region})`}
+                              </SelectItem>
+                            ))}
+                        </>
+                      )}
+                      {venues.filter(v => v.team_id === teamId).length > 0 && (
+                        <>
+                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
+                            Team Venues
+                          </div>
+                          {venues
+                            .filter(v => v.team_id === teamId)
+                            .map((venue) => (
+                              <SelectItem key={venue.id} value={venue.id}>
+                                {venue.name}
+                              </SelectItem>
+                            ))}
+                        </>
+                      )}
+                    </>
+                  )}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input
+                id="location"
+                placeholder="Court name, restaurant, etc."
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+              />
+            )}
           </div>
 
           {/* Description */}
@@ -522,6 +678,17 @@ export function AddEventDialog({
             </Button>
           </DialogFooter>
         </form>
+
+        <VenueDialog
+          open={showVenueDialog}
+          onOpenChange={setShowVenueDialog}
+          venue={null}
+          teamId={teamId}
+          onSaved={() => {
+            loadVenues()
+            setShowVenueDialog(false)
+          }}
+        />
       </DialogContent>
     </Dialog>
   )
