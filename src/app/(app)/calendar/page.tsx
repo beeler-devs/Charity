@@ -53,7 +53,7 @@ export default function CalendarPage() {
   async function loadTeams() {
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
-    
+
     if (!user) {
       setLoading(false)
       return
@@ -66,10 +66,10 @@ export default function CalendarPage() {
       .eq('user_id', user.id)
       .eq('is_active', true)
 
-    if (rosterData) {
-      const teamsList = rosterData.map(r => ({
+    if (rosterData && rosterData.length > 0) {
+      const teamsList = rosterData.map((r: any) => ({
         id: r.team_id,
-        name: (r.teams as any).name
+        name: r.teams.name
       }))
       setTeams(teamsList)
       // By default, show all teams
