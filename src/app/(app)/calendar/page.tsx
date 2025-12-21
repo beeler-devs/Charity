@@ -293,23 +293,6 @@ export default function CalendarPage() {
         ) : (
           <MonthView currentDate={currentDate} items={calendarItems} />
         )}
-
-        {/* Legend */}
-        <Card>
-          <CardContent className="p-3">
-            <h3 className="text-sm font-semibold mb-2">Legend</h3>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="flex items-center gap-2">
-                <Badge variant="default" className="text-xs">Match</Badge>
-                <span className="text-muted-foreground">Team matches</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">Event</Badge>
-                <span className="text-muted-foreground">Team events</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </main>
     </div>
   )
