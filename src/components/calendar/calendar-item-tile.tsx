@@ -69,15 +69,16 @@ export function CalendarItemTile({ item, compact = false }: CalendarItemTileProp
             {item.name}
           </p>
           
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <p className="text-xs text-muted-foreground">
               {formatTime(item.time)}
             </p>
-            {!compact && (
-              <p className="text-xs text-muted-foreground truncate">
-                {item.teamName}
-              </p>
-            )}
+            <p className={cn(
+              'text-muted-foreground truncate',
+              compact ? 'text-[10px]' : 'text-xs'
+            )}>
+              {item.teamName}
+            </p>
           </div>
         </div>
       </div>
