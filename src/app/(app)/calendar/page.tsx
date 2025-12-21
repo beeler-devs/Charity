@@ -39,16 +39,19 @@ export default function CalendarPage() {
   const [showMatches, setShowMatches] = useState(true)
   const [showEvents, setShowEvents] = useState(true)
   const [loading, setLoading] = useState(true)
+  const [teamsLoaded, setTeamsLoaded] = useState(false)
 
   useEffect(() => {
     loadTeams()
   }, [])
 
   useEffect(() => {
-    if (teams.length > 0) {
+    // Only load calendar data if teams have been loaded (even if empty)
+    // This prevents loading before teams are fetched
+    if (teamsLoaded) {
       loadCalendarData()
     }
-  }, [currentDate, viewMode, teams, selectedTeamIds, showMatches, showEvents])
+  }, [currentDate, viewMode, teams, selectedTeamIds, showMatches, showEvents, teamsLoaded])
 
   async function loadTeams() {
     const supabase = createClient()
@@ -74,11 +77,22 @@ export default function CalendarPage() {
       setTeams(teamsList)
       // By default, show all teams
       setSelectedTeamIds(teamsList.map(t => t.id))
+    } else {
+      // User has no teams, set empty array
+      setTeams([])
     }
+    
+    // Mark teams as loaded and set loading to false
+    setTeamsLoaded(true)
+    setLoading(false)
   }
 
   async function loadCalendarData() {
-    if (teams.length === 0) return
+    if (teams.length === 0) {
+      setCalendarItems([])
+      setLoading(false)
+      return
+    }
     
     setLoading(true)
     const supabase = createClient()
