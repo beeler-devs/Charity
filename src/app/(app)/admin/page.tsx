@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
-import { MapPin, Loader2, Settings } from 'lucide-react'
+import { MapPin, Loader2, Settings, Users } from 'lucide-react'
 
 export default function AdminDashboardPage() {
   const router = useRouter()
@@ -59,6 +59,22 @@ export default function AdminDashboardPage() {
                   <CardContent>
                     <p className="text-sm text-muted-foreground">
                       Add, edit, and manage tennis court locations for all teams
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+
+              <Link href="/admin/users">
+                <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Manage Users
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      View all users, edit profiles, manage system admin roles
                     </p>
                   </CardContent>
                 </Card>

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Bell, MessageCircle, Users, Settings } from 'lucide-react'
+import { Bell, MessageCircle, Users, Settings, LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -11,6 +11,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { createClient } from '@/lib/supabase/client'
 import { formatDistanceToNow } from 'date-fns'
 import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
+import { isImpersonating, getImpersonationState, stopImpersonation } from '@/lib/impersonation'
 
 interface HeaderProps {
   title: string
@@ -33,9 +34,26 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
   const [conversations, setConversations] = useState<RecentConversation[]>([])
   const [hasUnread, setHasUnread] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [impersonating, setImpersonating] = useState(false)
+  const [impersonationState, setImpersonationState] = useState<any>(null)
   const openRef = useRef(false)
   const router = useRouter()
   const { isAdmin } = useIsSystemAdmin()
+
+  useEffect(() => {
+    // Check impersonation state
+    const checkImpersonation = () => {
+      const isImp = isImpersonating()
+      const state = getImpersonationState()
+      setImpersonating(isImp)
+      setImpersonationState(state)
+    }
+    
+    checkImpersonation()
+    // Check periodically in case it changes in another tab
+    const interval = setInterval(checkImpersonation, 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -298,17 +316,43 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 safe-area-inset-top">
-      <div className="flex h-14 items-center justify-between px-4">
-        <h1 className="text-lg font-semibold">{title}</h1>
-        <div className="flex items-center gap-2">
-          {isAdmin && (
-            <Link href="/admin">
-              <Button variant="ghost" size="icon" title="System Admin">
-                <Settings className="h-5 w-5" />
-              </Button>
-            </Link>
-          )}
+    <>
+      {/* Impersonation Banner */}
+      {impersonating && impersonationState && (
+        <div className="sticky top-0 z-50 bg-yellow-500 text-yellow-900 border-b border-yellow-600 px-4 py-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <Users className="h-4 w-4" />
+              <span>
+                You are viewing as: <strong>{impersonationState.impersonatedUserName || impersonationState.impersonatedUserEmail}</strong>
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                stopImpersonation()
+              }}
+              className="bg-yellow-600 text-white border-yellow-700 hover:bg-yellow-700"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Exit Impersonation
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <header className={`sticky ${impersonating ? 'top-[42px]' : 'top-0'} z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 safe-area-inset-top`}>
+        <div className="flex h-14 items-center justify-between px-4">
+          <h1 className="text-lg font-semibold">{title}</h1>
+          <div className="flex items-center gap-2">
+            {isAdmin && !impersonating && (
+              <Link href="/admin">
+                <Button variant="ghost" size="icon" title="System Admin">
+                  <Settings className="h-5 w-5" />
+                </Button>
+              </Link>
+            )}
           {showNotifications && (
           <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -391,5 +435,6 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
         </div>
       </div>
     </header>
+    </>
   )
 }
