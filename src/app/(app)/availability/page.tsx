@@ -50,6 +50,7 @@ export default function BulkAvailabilityPage() {
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set())
   const [bulkStatus, setBulkStatus] = useState<AvailabilityStatus>('available')
   const [availabilityMap, setAvailabilityMap] = useState<Record<string, AvailabilityStatus>>({})
+  const [individualChanges, setIndividualChanges] = useState<Record<string, AvailabilityStatus>>({})
 
   useEffect(() => {
     loadData()
@@ -224,11 +225,17 @@ export default function BulkAvailabilityPage() {
         return false
       }
       if (selectedEventType !== 'all') {
-        if (event.type === 'match') {
-          return false // Matches don't have event types
-        }
-        if (event.eventType !== selectedEventType) {
-          return false
+        if (selectedEventType === 'match') {
+          // If filtering for matches, only show matches
+          return event.type === 'match'
+        } else {
+          // If filtering for event types, only show events (not matches) with that type
+          if (event.type === 'match') {
+            return false // Matches don't have event types
+          }
+          if (event.eventType !== selectedEventType) {
+            return false
+          }
         }
       }
       return true
@@ -263,6 +270,145 @@ export default function BulkAvailabilityPage() {
       }
       return newSet
     })
+  }
+
+  function handleIndividualStatusChange(eventId: string, status: AvailabilityStatus) {
+    // Store change locally without committing to database
+    setIndividualChanges(prev => {
+      const newChanges = { ...prev }
+      newChanges[eventId] = status
+      return newChanges
+    })
+  }
+
+  async function handleApplyIndividualChanges() {
+    if (Object.keys(individualChanges).length === 0) {
+      toast({
+        title: 'No changes',
+        description: 'No individual changes to apply',
+      })
+      return
+    }
+
+    setSaving(true)
+    const supabase = createClient()
+
+    // Get current user's roster memberships
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      setSaving(false)
+      return
+    }
+
+    const { data: rosterMembers } = await supabase
+      .from('roster_members')
+      .select('id, team_id')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+
+    if (!rosterMembers || rosterMembers.length === 0) {
+      toast({
+        title: 'Error',
+        description: 'No roster memberships found',
+        variant: 'destructive',
+      })
+      setSaving(false)
+      return
+    }
+
+    // Build roster member map by team
+    const rosterMap = new Map<string, string>()
+    rosterMembers.forEach(rm => {
+      rosterMap.set(rm.team_id, rm.id)
+    })
+
+    const errors: string[] = []
+
+    // Process all individual changes
+    for (const [eventId, status] of Object.entries(individualChanges)) {
+      const event = events.find(e => e.id === eventId)
+      if (!event) {
+        errors.push(`Event ${eventId} not found`)
+        continue
+      }
+
+      const rosterMemberId = rosterMap.get(event.teamId)
+      if (!rosterMemberId) {
+        errors.push(`No roster membership found for team ${event.teamId}`)
+        continue
+      }
+
+      // Check if availability record exists
+      let existingRecord = null
+      if (event.type === 'event') {
+        const { data: existing } = await supabase
+          .from('availability')
+          .select('id')
+          .eq('event_id', eventId)
+          .eq('roster_member_id', rosterMemberId)
+          .maybeSingle()
+        existingRecord = existing
+      } else {
+        const { data: existing } = await supabase
+          .from('availability')
+          .select('id')
+          .eq('match_id', eventId)
+          .eq('roster_member_id', rosterMemberId)
+          .maybeSingle()
+        existingRecord = existing
+      }
+
+      let error = null
+      if (existingRecord) {
+        const { error: updateError } = await supabase
+          .from('availability')
+          .update({ status })
+          .eq('id', existingRecord.id)
+        error = updateError
+      } else {
+        const insertData: any = {
+          roster_member_id: rosterMemberId,
+          status,
+        }
+        if (event.type === 'event') {
+          insertData.event_id = eventId
+        } else {
+          insertData.match_id = eventId
+        }
+        const { error: insertError } = await supabase
+          .from('availability')
+          .insert(insertData)
+        error = insertError
+      }
+
+      if (error) {
+        errors.push(`${event.name}: ${error.message}`)
+      }
+    }
+
+    if (errors.length > 0) {
+      toast({
+        title: 'Error',
+        description: `Failed to update some availability: ${errors.slice(0, 3).join('; ')}${errors.length > 3 ? ` and ${errors.length - 3} more` : ''}`,
+        variant: 'destructive',
+      })
+      setSaving(false)
+      // Still reload data to show what was saved
+      await loadData()
+      // Clear only successful changes
+      setIndividualChanges({})
+      return
+    }
+
+    toast({
+      title: 'Success',
+      description: `Updated availability for ${Object.keys(individualChanges).length} item(s)`,
+    })
+
+    // Clear changes and reload data
+    setIndividualChanges({})
+    await loadData()
+    setSaving(false)
   }
 
   async function handleBulkUpdate() {
@@ -449,7 +595,7 @@ export default function BulkAvailabilityPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header title="Bulk Availability" />
+      <Header title="Availability" />
 
       <main className="flex-1 p-4 space-y-4 pb-20">
         {/* Captain Team Availability Grids */}
@@ -485,7 +631,7 @@ export default function BulkAvailabilityPage() {
         )}
 
         {/* Filters */}
-        <Card className={captainTeams.length > 0 ? "-mt-2" : ""}>
+        <Card className={captainTeams.length > 0 ? "-mt-3" : ""}>
           <CardHeader>
             <CardTitle>Filters</CardTitle>
           </CardHeader>
@@ -531,7 +677,7 @@ export default function BulkAvailabilityPage() {
 
         {/* Bulk Actions */}
         {filteredEvents.length > 0 && (
-          <Card>
+          <Card className="-mt-3">
             <CardHeader>
               <CardTitle>Bulk Actions</CardTitle>
             </CardHeader>
@@ -603,9 +749,31 @@ export default function BulkAvailabilityPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle>
-                Upcoming Events ({filteredEvents.length})
-              </CardTitle>
+              <div className="flex items-center gap-3">
+                <CardTitle>
+                  Upcoming Events ({filteredEvents.length})
+                </CardTitle>
+                {Object.keys(individualChanges).length > 0 && (
+                  <Button
+                    onClick={handleApplyIndividualChanges}
+                    disabled={saving}
+                    size="sm"
+                    className="ml-auto"
+                  >
+                    {saving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="h-4 w-4 mr-2" />
+                        Apply {Object.keys(individualChanges).length} Change(s)
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
               {filteredEvents.length > 0 && (
                 <Button
                   variant="outline"
@@ -665,10 +833,58 @@ export default function BulkAvailabilityPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      {getStatusIcon(event.currentStatus)}
-                      <span className="text-sm text-muted-foreground min-w-[80px] text-right">
-                        {getStatusLabel(event.currentStatus)}
-                      </span>
+                      <Select
+                        value={individualChanges[event.id] || event.currentStatus || 'unavailable'}
+                        onValueChange={(value) => handleIndividualStatusChange(event.id, value as AvailabilityStatus)}
+                        disabled={saving}
+                      >
+                        <SelectTrigger className={cn(
+                          "w-[140px] h-8",
+                          individualChanges[event.id] && "ring-2 ring-blue-500 ring-offset-1"
+                        )}>
+                          <div className="flex items-center gap-2">
+                            {getStatusIcon(individualChanges[event.id] || event.currentStatus)}
+                            <span className="text-sm">
+                              {getStatusLabel(individualChanges[event.id] || event.currentStatus)}
+                            </span>
+                            {individualChanges[event.id] && (
+                              <span className="text-blue-500 text-xs">*</span>
+                            )}
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="available">
+                            <div className="flex items-center gap-2">
+                              <Check className="h-4 w-4 text-green-500" />
+                              <span>Available</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="unavailable">
+                            <div className="flex items-center gap-2">
+                              <X className="h-4 w-4 text-red-500" />
+                              <span>Unavailable</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="maybe">
+                            <div className="flex items-center gap-2">
+                              <HelpCircle className="h-4 w-4 text-yellow-500" />
+                              <span>Maybe</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="late">
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-orange-500" />
+                              <span>Running Late</span>
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="last_resort">
+                            <div className="flex items-center gap-2">
+                              <HelpCircle className="h-4 w-4 text-purple-500" />
+                              <span>Last Resort</span>
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
                 ))}

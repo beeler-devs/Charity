@@ -12,7 +12,8 @@ import { RosterMember, Match, Availability } from '@/types/database.types'
 import { formatDate, formatTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import { Check, X, HelpCircle, Clock, Info, ChevronDown, ArrowLeft, Save } from 'lucide-react'
+import { Check, X, HelpCircle, Clock, Info, ChevronDown, ArrowLeft, Save, Filter, Users } from 'lucide-react'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -25,6 +26,17 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { getEventTypeLabel, getEventTypes } from '@/lib/event-type-colors'
 
 interface PlayerStats {
   matchesPlayed: number
@@ -34,9 +46,23 @@ interface PlayerStats {
   totalMatches: number
 }
 
+type CalendarItem = Match | {
+  id: string
+  team_id: string
+  date: string
+  time: string
+  event_name: string
+  event_type?: string | null
+  location?: string | null
+  description?: string | null
+  type: 'event'
+}
+
 interface AvailabilityData {
   players: Array<RosterMember & { stats: PlayerStats }>
   matches: Match[]
+  events: CalendarItem[]
+  items: CalendarItem[] // Combined matches and events
   availability: Record<string, Record<string, Availability>>
   availabilityCounts: Record<string, { available: number; total: number }>
 }
@@ -48,14 +74,25 @@ export default function AvailabilityPage() {
   const [data, setData] = useState<AvailabilityData>({
     players: [],
     matches: [],
+    events: [],
+    items: [],
     availability: {},
     availabilityCounts: {},
   })
   const [isCaptain, setIsCaptain] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [teamName, setTeamName] = useState<string>('')
+  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match']) // Default to matches only
   const [openPopovers, setOpenPopovers] = useState<Record<string, boolean>>({})
   const [pendingChanges, setPendingChanges] = useState<Record<string, Record<string, 'available' | 'unavailable' | 'maybe' | 'late' | 'last_resort'>>>({})
+  const [bulkAvailabilityDialog, setBulkAvailabilityDialog] = useState<{
+    open: boolean
+    type: 'row' | 'event' | null
+    playerId?: string
+    itemId?: string
+  }>({ open: false, type: null })
+  const [bulkStatus, setBulkStatus] = useState<'available' | 'unavailable' | null>(null)
   const { toast } = useToast()
 
   const getInitials = (name: string) => {
@@ -78,12 +115,16 @@ export default function AvailabilityPage() {
     // Get current user and check if captain, also load team configuration
     const { data: { user } } = await supabase.auth.getUser()
     
-    // Load team configuration
+    // Load team configuration and name
     const { data: teamData } = await supabase
       .from('teams')
-      .select('captain_id, co_captain_id, total_lines, line_match_types')
+      .select('name, captain_id, co_captain_id, total_lines, line_match_types')
       .eq('id', teamId)
       .single()
+    
+    if (teamData?.name) {
+      setTeamName(teamData.name)
+    }
 
     let teamTotalLines = 3 // Default to 3 courts
     let teamLineMatchTypes: string[] = []
@@ -116,7 +157,7 @@ export default function AvailabilityPage() {
       return
     }
 
-    // Load upcoming matches only (this view is for matches)
+    // Load upcoming matches and events
     const today = new Date().toISOString().split('T')[0]
     const { data: matches } = await supabase
       .from('matches')
@@ -124,21 +165,52 @@ export default function AvailabilityPage() {
       .eq('team_id', teamId)
       .gte('date', today)
       .order('date')
-      .limit(10)
+      .limit(20)
 
-    if (!matches || matches.length === 0) {
+    const { data: events } = await supabase
+      .from('events')
+      .select('*')
+      .eq('team_id', teamId)
+      .gte('date', today)
+      .order('date')
+      .limit(20)
+
+    const playerIds = players.map(p => p.id)
+    const matchIds = (matches || []).map(m => m.id)
+    const eventIds = (events || []).map(e => e.id)
+    
+    // Combine matches and events into items array
+    const allItems: CalendarItem[] = []
+    if (matches) {
+      matches.forEach(m => {
+        allItems.push({ ...m, type: 'match' as const })
+      })
+    }
+    if (events) {
+      events.forEach(e => {
+        allItems.push({ ...e, type: 'event' as const })
+      })
+    }
+    
+    // Sort by date and time
+    allItems.sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date)
+      if (dateCompare !== 0) return dateCompare
+      return a.time.localeCompare(b.time)
+    })
+
+    if (allItems.length === 0) {
       setData({
         players: players.map(p => ({ ...p, stats: { matchesPlayed: 0, matchesWon: 0, matchesLost: 0, availabilityCount: 0, totalMatches: 0 } })),
         matches: [],
+        events: [],
+        items: [],
         availability: {},
         availabilityCounts: {},
       })
       setLoading(false)
       return
     }
-
-    const playerIds = players.map(p => p.id)
-    const matchIds = matches.map(m => m.id)
 
     // Load player statistics from individual_statistics table
     const { data: statsData } = await supabase
@@ -155,22 +227,23 @@ export default function AvailabilityPage() {
       })
     })
 
-    // Load availability for all player/match combinations
+    // Load availability for all player/match and player/event combinations
     const { data: availabilityData } = await supabase
       .from('availability')
       .select('*')
       .in('roster_member_id', playerIds)
-      .in('match_id', matchIds)
+      .or(`match_id.in.(${matchIds.join(',')}),event_id.in.(${eventIds.join(',')})`)
 
-    // Build availability lookup
+    // Build availability lookup (for both matches and events)
     const availability: Record<string, Record<string, Availability>> = {}
     availabilityData?.forEach(a => {
-      if (!a.match_id) return
+      const itemId = a.match_id || a.event_id
+      if (!itemId) return
       
       if (!availability[a.roster_member_id]) {
         availability[a.roster_member_id] = {}
       }
-      availability[a.roster_member_id][a.match_id] = a
+      availability[a.roster_member_id][itemId] = a
     })
 
     // Calculate availability counts per match
@@ -190,19 +263,24 @@ export default function AvailabilityPage() {
         }, 0)
       : teamTotalLines * 2 // Default: assume all doubles (2 players per court)
     
-    matchIds.forEach(matchId => {
+    // Calculate availability counts for all items (matches and events)
+    allItems.forEach(item => {
+      const itemId = item.id
       let available = 0
       
       // Count only players with status = 'available' (not maybe, late, etc.)
       // This will be recalculated when rendering to include pending changes
       playerIds.forEach(playerId => {
-        const avail = availability[playerId]?.[matchId]
+        const avail = availability[playerId]?.[itemId]
         if (avail && avail.status === 'available') {
           available++
         }
       })
       
-      availabilityCounts[matchId] = { available, total: playersNeeded }
+      // For events, we don't have a "players needed" calculation, so use a default
+      // For matches, use the calculated playersNeeded
+      const totalNeeded = item.type === 'match' ? playersNeeded : 1 // Events default to 1 for now
+      availabilityCounts[itemId] = { available, total: totalNeeded }
     })
 
     // Calculate player stats (including availability count)
@@ -218,14 +296,16 @@ export default function AvailabilityPage() {
           matchesWon: stats.matchesWon,
           matchesLost: stats.matchesLost,
           availabilityCount,
-          totalMatches: matches.length,
+          totalMatches: allItems.length,
         }
       }
     })
 
     setData({
       players: playersWithStats,
-      matches,
+      matches: matches || [],
+      events: events || [],
+      items: allItems,
       availability,
       availabilityCounts,
     })
@@ -234,7 +314,7 @@ export default function AvailabilityPage() {
 
   function updateAvailabilityLocal(
     playerId: string,
-    matchId: string,
+    itemId: string,
     status: 'available' | 'unavailable' | 'maybe' | 'late' | 'last_resort'
   ) {
     try {
@@ -247,18 +327,18 @@ export default function AvailabilityPage() {
         return
       }
 
-      if (!playerId || !matchId) {
-        console.error('Invalid playerId or matchId:', { playerId, matchId })
+      if (!playerId || !itemId) {
+        console.error('Invalid playerId or itemId:', { playerId, itemId })
         toast({
           title: 'Error',
-          description: 'Invalid player or match information',
+          description: 'Invalid player or item information',
           variant: 'destructive',
         })
         return
       }
 
       // Close the popover
-      const popoverKey = `${playerId}-${matchId}`
+      const popoverKey = `${playerId}-${itemId}`
       setOpenPopovers(prev => ({ ...prev, [popoverKey]: false }))
 
       // Store change in pending changes (offline)
@@ -267,7 +347,7 @@ export default function AvailabilityPage() {
         if (!newChanges[playerId]) {
           newChanges[playerId] = {}
         }
-        newChanges[playerId][matchId] = status
+        newChanges[playerId][itemId] = status
         return newChanges
       })
     } catch (err) {
@@ -278,6 +358,97 @@ export default function AvailabilityPage() {
         variant: 'destructive',
       })
     }
+  }
+
+  function handleBulkAvailability(type: 'row' | 'event', playerId?: string, itemId?: string) {
+    setBulkAvailabilityDialog({ open: true, type, playerId, itemId })
+  }
+
+  function confirmBulkAvailability() {
+    if (!bulkStatus || !bulkAvailabilityDialog.type) return
+
+    const changes: Record<string, Record<string, 'available' | 'unavailable' | 'maybe' | 'late' | 'last_resort'>> = {}
+    let overwriteCount = 0
+
+    if (bulkAvailabilityDialog.type === 'row' && bulkAvailabilityDialog.playerId) {
+      // Mark all items for a player
+      const playerId = bulkAvailabilityDialog.playerId
+      const displayedItems = getDisplayedItems()
+      
+      displayedItems.forEach(item => {
+        const existing = data.availability[playerId]?.[item.id]
+        if (existing && existing.status !== bulkStatus) {
+          overwriteCount++
+        }
+        if (!changes[playerId]) {
+          changes[playerId] = {}
+        }
+        changes[playerId][item.id] = bulkStatus
+      })
+    } else if (bulkAvailabilityDialog.type === 'event' && bulkAvailabilityDialog.itemId) {
+      // Mark all players for an item
+      const itemId = bulkAvailabilityDialog.itemId
+      
+      data.players.forEach(player => {
+        const existing = data.availability[player.id]?.[itemId]
+        if (existing && existing.status !== bulkStatus) {
+          overwriteCount++
+        }
+        if (!changes[player.id]) {
+          changes[player.id] = {}
+        }
+        changes[player.id][itemId] = bulkStatus
+      })
+    }
+
+    if (overwriteCount > 0) {
+      // Show warning dialog
+      setBulkAvailabilityDialog(prev => ({ ...prev, open: false }))
+      // For now, proceed with the change - we'll add a proper warning dialog later
+      setPendingChanges(prev => {
+        const newChanges = { ...prev }
+        Object.keys(changes).forEach(playerId => {
+          if (!newChanges[playerId]) {
+            newChanges[playerId] = {}
+          }
+          Object.keys(changes[playerId]).forEach(itemId => {
+            newChanges[playerId][itemId] = changes[playerId][itemId]
+          })
+        })
+        return newChanges
+      })
+      toast({
+        title: 'Bulk availability set',
+        description: `Set ${overwriteCount > 0 ? `(overwrote ${overwriteCount} existing)` : ''}`,
+      })
+    } else {
+      setPendingChanges(prev => {
+        const newChanges = { ...prev }
+        Object.keys(changes).forEach(playerId => {
+          if (!newChanges[playerId]) {
+            newChanges[playerId] = {}
+          }
+          Object.keys(changes[playerId]).forEach(itemId => {
+            newChanges[playerId][itemId] = changes[playerId][itemId]
+          })
+        })
+        return newChanges
+      })
+    }
+
+    setBulkAvailabilityDialog({ open: false, type: null })
+    setBulkStatus(null)
+  }
+
+  function getDisplayedItems(): CalendarItem[] {
+    return data.items.filter(item => {
+      if (item.type === 'match') {
+        return selectedEventTypes.includes('match')
+      } else {
+        const eventType = (item as any).event_type || 'other'
+        return selectedEventTypes.includes(eventType) || selectedEventTypes.includes('all')
+      }
+    })
   }
 
   async function saveAllChanges() {
@@ -299,9 +470,13 @@ export default function AvailabilityPage() {
 
     try {
       // Process all pending changes
-      for (const [playerId, matchChanges] of Object.entries(pendingChanges)) {
-        for (const [matchId, status] of Object.entries(matchChanges)) {
-          const existing = data.availability[playerId]?.[matchId]
+      for (const [playerId, itemChanges] of Object.entries(pendingChanges)) {
+        for (const [itemId, status] of Object.entries(itemChanges)) {
+          const existing = data.availability[playerId]?.[itemId]
+          
+          // Determine if this is a match or event
+          const item = data.items.find(i => i.id === itemId)
+          const isMatch = item?.type === 'match'
 
           try {
             if (existing) {
@@ -313,26 +488,33 @@ export default function AvailabilityPage() {
               
               if (error) {
                 console.error('Error updating availability:', error)
-                errors.push(`${playerId}-${matchId}: ${error.message}`)
+                errors.push(`${playerId}-${itemId}: ${error.message}`)
               }
             } else {
               // Insert new availability record
+              const insertData: any = {
+                roster_member_id: playerId,
+                status,
+              }
+              
+              if (isMatch) {
+                insertData.match_id = itemId
+              } else {
+                insertData.event_id = itemId
+              }
+              
               const { error } = await supabase
                 .from('availability')
-                .insert({
-                  roster_member_id: playerId,
-                  match_id: matchId,
-                  status,
-                })
+                .insert(insertData)
               
               if (error) {
                 console.error('Error inserting availability:', error)
-                errors.push(`${playerId}-${matchId}: ${error.message}`)
+                errors.push(`${playerId}-${itemId}: ${error.message}`)
               }
             }
           } catch (err) {
             console.error('Exception saving availability:', err)
-            errors.push(`${playerId}-${matchId}: ${err instanceof Error ? err.message : 'Unknown error'}`)
+            errors.push(`${playerId}-${itemId}: ${err instanceof Error ? err.message : 'Unknown error'}`)
           }
         }
       }
@@ -430,7 +612,7 @@ export default function AvailabilityPage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header title="Availability" />
+      <Header title={teamName ? `Availability - ${teamName}` : "Availability"} />
 
       <main className="flex-1 p-4 pt-2">
         <div className="flex items-center justify-between mb-2">
@@ -451,11 +633,51 @@ export default function AvailabilityPage() {
             </Button>
           )}
         </div>
+
+        {/* Event Type Filter */}
+        <Card className="mb-4">
+          <CardContent className="p-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Label className="text-sm font-medium">Show:</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  variant={selectedEventTypes.includes('match') ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => {
+                    if (selectedEventTypes.includes('match')) {
+                      setSelectedEventTypes(selectedEventTypes.filter(t => t !== 'match'))
+                    } else {
+                      setSelectedEventTypes([...selectedEventTypes, 'match'])
+                    }
+                  }}
+                >
+                  Matches
+                </Button>
+                {getEventTypes().map(({ value, label }) => (
+                  <Button
+                    key={value}
+                    variant={selectedEventTypes.includes(value) ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => {
+                      if (selectedEventTypes.includes(value)) {
+                        setSelectedEventTypes(selectedEventTypes.filter(t => t !== value))
+                      } else {
+                        setSelectedEventTypes([...selectedEventTypes, value])
+                      }
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
         
-        {data.matches.length === 0 ? (
+        {getDisplayedItems().length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center">
-              <p className="text-muted-foreground">No upcoming matches</p>
+              <p className="text-muted-foreground">No items to display</p>
             </CardContent>
           </Card>
         ) : (
@@ -468,11 +690,26 @@ export default function AvailabilityPage() {
                     PLAYER
                   </th>
                   <th className="p-2 text-center text-sm font-medium border-r min-w-[120px] bg-gray-50">
-                    MATCH HISTORY
+                    HISTORY
                   </th>
-                  {data.matches.map((match, index) => (
-                    <th key={match.id} className="p-2 text-center text-sm font-medium border-r min-w-[140px] bg-gray-50">
-                      MATCH {index + 1} {match.is_home ? '(H)' : '(A)'}
+                  {getDisplayedItems().map((item, index) => (
+                    <th key={item.id} className="p-2 text-center text-sm font-medium border-r min-w-[140px] bg-gray-50">
+                      {item.type === 'match' ? (
+                        <>MATCH {index + 1} {(item as Match).is_home ? '(H)' : '(A)'}</>
+                      ) : (
+                        <>EVENT {index + 1}</>
+                      )}
+                      {isCaptain && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 ml-1"
+                          onClick={() => handleBulkAvailability('event', undefined, item.id)}
+                          title="Mark all players"
+                        >
+                          <Users className="h-3 w-3" />
+                        </Button>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -482,14 +719,14 @@ export default function AvailabilityPage() {
                   <th className="p-2 text-center text-xs text-muted-foreground border-r">
                     AVAILABLE
                   </th>
-                  {data.matches.map(match => {
-                    const baseCount = data.availabilityCounts[match.id] || { available: 0, total: data.players.length }
+                  {getDisplayedItems().map(item => {
+                    const baseCount = data.availabilityCounts[item.id] || { available: 0, total: data.players.length }
                     
                     // Recalculate available count including pending changes
                     let availableCount = baseCount.available
                     data.players.forEach(player => {
-                      const pendingStatus = pendingChanges[player.id]?.[match.id]
-                      const savedStatus = data.availability[player.id]?.[match.id]?.status
+                      const pendingStatus = pendingChanges[player.id]?.[item.id]
+                      const savedStatus = data.availability[player.id]?.[item.id]?.status
                       
                       if (pendingStatus) {
                         // Adjust count based on pending change
@@ -502,18 +739,17 @@ export default function AvailabilityPage() {
                     })
                     
                     // Format: "1-2-26 @7:45P"
-                    const matchDate = formatDate(match.date, 'M-d-yy')
-                    const timeStr = formatTime(match.time)
+                    const itemDate = formatDate(item.date, 'M-d-yy')
+                    const timeStr = formatTime(item.time)
                     const timeParts = timeStr.split(':')
                     const hour = parseInt(timeParts[0])
                     const minute = timeParts[1].split(' ')[0]
                     const ampm = timeStr.includes('AM') ? 'A' : 'P'
                     const formattedTime = `${hour}:${minute}${ampm}`
-                    const opponent = match.opponent_name || 'TBD'
-                    const dateTimeText = `${matchDate} @${formattedTime}`
+                    const dateTimeText = `${itemDate} @${formattedTime}`
                     
                     return (
-                      <th key={match.id} className="p-2 border-r">
+                      <th key={item.id} className="p-2 border-r">
                         <div className="text-xs font-medium mb-1 text-left px-1">
                           {dateTimeText}
                         </div>
@@ -527,16 +763,18 @@ export default function AvailabilityPage() {
                     )
                   })}
                 </tr>
-                {/* Third header row: Opponent names */}
+                {/* Third header row: Opponent/Event names */}
                 <tr className="border-b bg-gray-50">
                   <th className="sticky left-0 bg-gray-50 p-2 border-r z-10"></th>
                   <th className="p-2 text-center text-xs text-muted-foreground border-r"></th>
-                  {data.matches.map(match => {
-                    const opponent = match.opponent_name || 'TBD'
+                  {getDisplayedItems().map(item => {
+                    const displayName = item.type === 'match' 
+                      ? ((item as Match).opponent_name || 'TBD')
+                      : ((item as any).event_name || 'Event')
                     return (
-                      <th key={match.id} className="p-2 border-r">
+                      <th key={item.id} className="p-2 border-r">
                         <div className="text-xs font-medium text-left px-1">
-                          {opponent}
+                          {displayName}
                         </div>
                       </th>
                     )
@@ -588,31 +826,44 @@ export default function AvailabilityPage() {
                             </PopoverContent>
                           </Popover>
                         </div>
-                        <span className="text-sm font-medium">{player.full_name}</span>
+                        <div className="flex-1">
+                          <span className="text-sm font-medium">{player.full_name}</span>
+                          {isCaptain && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 ml-1"
+                              onClick={() => handleBulkAvailability('row', player.id)}
+                              title="Mark all events for this player"
+                            >
+                              <Users className="h-3 w-3" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
                     </td>
                     
-                    {/* Match History column */}
+                    {/* History column */}
                     <td className="p-2 text-center text-xs border-r">
                       <div className="space-y-0.5">
-                        <div>- Played {player.stats.matchesPlayed} of {data.matches.length}</div>
+                        <div>- Played {player.stats.matchesPlayed} of {getDisplayedItems().filter(i => i.type === 'match').length}</div>
                         <div>- {player.stats.matchesWon} wins / {player.stats.matchesLost} loss</div>
-                        <div>- Avail {player.stats.availabilityCount} of {data.matches.length}</div>
+                        <div>- Avail {player.stats.availabilityCount} of {getDisplayedItems().length}</div>
                       </div>
                     </td>
                     
-                    {/* Match columns */}
-                    {data.matches.map(match => {
-                      const avail = data.availability[player.id]?.[match.id]
-                      const pendingStatus = pendingChanges[player.id]?.[match.id]
+                    {/* Item columns */}
+                    {getDisplayedItems().map(item => {
+                      const avail = data.availability[player.id]?.[item.id]
+                      const pendingStatus = pendingChanges[player.id]?.[item.id]
                       // Show pending status if available, otherwise show saved status
                       const status = pendingStatus || avail?.status
                       const hasPendingChange = !!pendingStatus
-                      const popoverKey = `${player.id}-${match.id}`
+                      const popoverKey = `${player.id}-${item.id}`
                       const isOpen = openPopovers[popoverKey] || false
                       
                       return (
-                        <td key={match.id} className="p-2 text-center border-r">
+                        <td key={item.id} className="p-2 text-center border-r">
                           {isCaptain ? (
                             <Popover open={isOpen} onOpenChange={(open) => setOpenPopovers(prev => ({ ...prev, [popoverKey]: open }))}>
                               <PopoverTrigger asChild>
@@ -638,7 +889,7 @@ export default function AvailabilityPage() {
                                   <Button
                                     variant="ghost"
                                     className="w-full justify-start rounded-none"
-                                    onClick={() => updateAvailabilityLocal(player.id, match.id, 'available')}
+                                    onClick={() => updateAvailabilityLocal(player.id, item.id, 'available')}
                                   >
                                     <Check className="h-4 w-4 mr-2 text-green-500" />
                                     Available
@@ -646,7 +897,7 @@ export default function AvailabilityPage() {
                                   <Button
                                     variant="ghost"
                                     className="w-full justify-start rounded-none"
-                                    onClick={() => updateAvailabilityLocal(player.id, match.id, 'unavailable')}
+                                    onClick={() => updateAvailabilityLocal(player.id, item.id, 'unavailable')}
                                   >
                                     <X className="h-4 w-4 mr-2 text-red-500" />
                                     Unavailable
@@ -654,7 +905,7 @@ export default function AvailabilityPage() {
                                   <Button
                                     variant="ghost"
                                     className="w-full justify-start rounded-none"
-                                    onClick={() => updateAvailabilityLocal(player.id, match.id, 'maybe')}
+                                    onClick={() => updateAvailabilityLocal(player.id, item.id, 'maybe')}
                                   >
                                     <HelpCircle className="h-4 w-4 mr-2 text-yellow-500" />
                                     Maybe
@@ -662,7 +913,7 @@ export default function AvailabilityPage() {
                                   <Button
                                     variant="ghost"
                                     className="w-full justify-start rounded-none"
-                                    onClick={() => updateAvailabilityLocal(player.id, match.id, 'late')}
+                                    onClick={() => updateAvailabilityLocal(player.id, item.id, 'late')}
                                   >
                                     <Clock className="h-4 w-4 mr-2 text-orange-500" />
                                     Running Late
@@ -670,7 +921,7 @@ export default function AvailabilityPage() {
                                   <Button
                                     variant="ghost"
                                     className="w-full justify-start rounded-none"
-                                    onClick={() => updateAvailabilityLocal(player.id, match.id, 'last_resort')}
+                                    onClick={() => updateAvailabilityLocal(player.id, item.id, 'last_resort')}
                                   >
                                     <HelpCircle className="h-4 w-4 mr-2 text-purple-500" />
                                     Last Resort
@@ -702,6 +953,54 @@ export default function AvailabilityPage() {
             </table>
           </div>
         )}
+
+        {/* Bulk Availability Dialog */}
+        <AlertDialog open={bulkAvailabilityDialog.open} onOpenChange={(open) => setBulkAvailabilityDialog({ open, type: null })}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {bulkAvailabilityDialog.type === 'row' ? 'Set Availability for All Events' : 'Set Availability for All Players'}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {bulkAvailabilityDialog.type === 'row' 
+                  ? 'This will set the availability status for this player across all displayed events. Existing availability will be overwritten.'
+                  : 'This will set the availability status for all players for this event. Existing availability will be overwritten.'}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-2 py-4">
+              <Button
+                variant={bulkStatus === 'available' ? 'default' : 'outline'}
+                className="w-full justify-start"
+                onClick={() => setBulkStatus('available')}
+              >
+                <Check className="h-4 w-4 mr-2 text-green-500" />
+                Available
+              </Button>
+              <Button
+                variant={bulkStatus === 'unavailable' ? 'default' : 'outline'}
+                className="w-full justify-start"
+                onClick={() => setBulkStatus('unavailable')}
+              >
+                <X className="h-4 w-4 mr-2 text-red-500" />
+                Unavailable
+              </Button>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {
+                setBulkAvailabilityDialog({ open: false, type: null })
+                setBulkStatus(null)
+              }}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={confirmBulkAvailability}
+                disabled={!bulkStatus}
+              >
+                Confirm
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </main>
     </div>
   )

@@ -25,7 +25,24 @@ import {
 import { useToast } from '@/hooks/use-toast'
 import { Loader2 } from 'lucide-react'
 import { addDays, addWeeks, format, parseISO, isBefore, isAfter } from 'date-fns'
-import { Event } from '@/types/database.types'
+// Event type defined inline
+type Event = {
+  id: string
+  team_id: string
+  event_name: string
+  date: string
+  time: string
+  location?: string | null
+  description?: string | null
+  event_type?: string | null
+  duration?: number | null
+  recurrence_series_id?: string | null
+  recurrence_pattern?: string | null
+  recurrence_end_date?: string | null
+  recurrence_occurrences?: number | null
+  recurrence_original_date?: string | null
+  [key: string]: any
+}
 import { getEventTypes } from '@/lib/event-type-colors'
 import { EventType } from '@/lib/calendar-utils'
 
@@ -35,6 +52,7 @@ interface EditEventDialogProps {
   event: Event | null
   teamId: string
   onUpdated: () => void
+  initialEditScope?: 'series' | 'single'
 }
 
 export function EditEventDialog({
@@ -43,6 +61,7 @@ export function EditEventDialog({
   event,
   teamId,
   onUpdated,
+  initialEditScope,
 }: EditEventDialogProps) {
   const [eventName, setEventName] = useState('')
   const [date, setDate] = useState('')
@@ -80,14 +99,22 @@ export function EditEventDialog({
         setEndType((event as any).recurrence_end_date ? 'date' : 'occurrences')
         setEndDate((event as any).recurrence_end_date || '')
         setOccurrences((event as any).recurrence_occurrences?.toString() || '')
+        // Always load series events to check if it's part of a series
         loadSeriesEvents((event as any).recurrence_series_id)
         
         // Determine if event has passed
         const eventDate = parseISO(event.date)
         const today = new Date()
         today.setHours(0, 0, 0, 0)
-        if (isBefore(eventDate, today)) {
+        
+        // Use initialEditScope if provided, otherwise default based on event date
+        if (initialEditScope) {
+          setEditScope(initialEditScope)
+        } else if (isBefore(eventDate, today)) {
           setEditScope('series') // Default to series if event passed
+        } else {
+          // Default to 'single' for future events so user can choose
+          setEditScope('single')
         }
       }
     }
@@ -356,20 +383,28 @@ export function EditEventDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
-          {/* Edit Scope Selection (only for recurring series with future events) */}
-          {isPartOfSeries && !isPastEvent && (
-            <div className="space-y-3 p-4 bg-muted rounded-lg">
-              <Label>Edit Options</Label>
+          {/* Edit Scope Selection (always show for recurring events) */}
+          {isRecurring && (
+            <div className="space-y-3 p-4 bg-muted rounded-lg border-2 border-primary/20">
+              <Label className="text-base font-semibold">Edit Recurring Event</Label>
+              <p className="text-sm text-muted-foreground">
+                Choose whether to edit this occurrence only or all events in the series
+              </p>
               <Select value={editScope} onValueChange={(value) => setEditScope(value as 'series' | 'single')}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="series">
-                    All future events in this series ({seriesEvents.filter(e => {
-                      const eDate = parseISO(e.date)
-                      return !isBefore(eDate, today) || e.id === event?.id
-                    }).length} events)
+                    All future events in this series
+                    {seriesEvents.length > 0 && (
+                      <span className="text-muted-foreground ml-2">
+                        ({seriesEvents.filter(e => {
+                          const eDate = parseISO(e.date)
+                          return !isBefore(eDate, today) || e.id === event?.id
+                        }).length} events)
+                      </span>
+                    )}
                   </SelectItem>
                   <SelectItem value="single">
                     This event only

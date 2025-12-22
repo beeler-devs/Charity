@@ -155,3 +155,4 @@ Or manually update `src/types/database.types.ts`:
 - [ ] API routes check admin status
 - [ ] UI conditionally renders based on admin status
 
+

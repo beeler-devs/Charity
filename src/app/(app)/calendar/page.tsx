@@ -23,11 +23,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { WeekView } from '@/components/calendar/week-view'
 import { MonthView } from '@/components/calendar/month-view'
 import { CalendarFilters } from '@/components/calendar/calendar-filters'
+import { CalendarItemTile } from '@/components/calendar/calendar-item-tile'
 import { AddEventDialog } from '@/components/teams/add-event-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { startOfWeek, addDays } from 'date-fns'
 
-type ViewMode = 'week' | 'month'
+type ViewMode = 'week' | 'month' | 'list'
 
 interface TeamInfo {
   id: string
@@ -125,9 +126,12 @@ export default function CalendarPage() {
     }
 
     // Determine date range based on view mode
-    const dateRange = viewMode === 'month' 
-      ? getDateRangeForMonth(currentDate)
-      : getDateRangeForWeek(currentDate, numWeeks)
+    // For list view, load all upcoming items (no end date limit)
+    const dateRange = viewMode === 'list'
+      ? { start: new Date().toISOString().split('T')[0], end: '9999-12-31' }
+      : viewMode === 'month' 
+        ? getDateRangeForMonth(currentDate)
+        : getDateRangeForWeek(currentDate, numWeeks)
 
     // Filter teams if specific teams selected
     const teamIds = selectedTeamIds.length > 0 ? selectedTeamIds : teams.map(t => t.id)
@@ -136,12 +140,17 @@ export default function CalendarPage() {
 
     // Load matches if enabled
     if (showMatches) {
-      const { data: matches } = await supabase
+      let query = supabase
         .from('matches')
         .select('*, teams!inner(id, name)')
         .in('team_id', teamIds)
         .gte('date', dateRange.start)
-        .lte('date', dateRange.end)
+      
+      if (viewMode !== 'list') {
+        query = query.lte('date', dateRange.end)
+      }
+      
+      const { data: matches } = await query
         .order('date', { ascending: true })
         .order('time', { ascending: true })
 
@@ -162,12 +171,17 @@ export default function CalendarPage() {
 
     // Load events if enabled
     if (showEvents) {
-      const { data: events } = await supabase
+      let query = supabase
         .from('events')
         .select('*, teams!inner(id, name)')
         .in('team_id', teamIds)
         .gte('date', dateRange.start)
-        .lte('date', dateRange.end)
+      
+      if (viewMode !== 'list') {
+        query = query.lte('date', dateRange.end)
+      }
+      
+      const { data: events } = await query
         .order('date', { ascending: true })
         .order('time', { ascending: true })
 
@@ -309,9 +323,10 @@ export default function CalendarPage() {
               />
 
               <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as ViewMode)} className="flex-1">
-                <TabsList className="grid w-full grid-cols-2">
+                <TabsList className="grid w-full grid-cols-3">
                   <TabsTrigger value="week">Week</TabsTrigger>
                   <TabsTrigger value="month">Month</TabsTrigger>
+                  <TabsTrigger value="list">List</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -331,6 +346,27 @@ export default function CalendarPage() {
                     <SelectItem value="4">4 weeks</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+            )}
+            {/* Navigation buttons - hidden in list view */}
+            {viewMode !== 'list' && (
+              <div className="flex items-center justify-center gap-2 mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePrevious}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNext}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
               </div>
             )}
           </CardContent>
@@ -426,8 +462,27 @@ export default function CalendarPage() {
             onPrevious={handlePrevious}
             onNext={handleNext}
           />
+        ) : viewMode === 'month' ? (
+          <MonthView 
+            currentDate={currentDate} 
+            items={calendarItems}
+            onPrevious={handlePrevious}
+            onNext={handleNext}
+          />
         ) : (
-          <MonthView currentDate={currentDate} items={calendarItems} />
+          <div className="space-y-2">
+            {calendarItems.length === 0 ? (
+              <Card>
+                <CardContent className="py-12 text-center">
+                  <p className="text-muted-foreground">No events scheduled</p>
+                </CardContent>
+              </Card>
+            ) : (
+              calendarItems.map((item) => (
+                <CalendarItemTile key={item.id} item={item} compact={false} />
+              ))
+            )}
+          </div>
         )}
       </main>
 

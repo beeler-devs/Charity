@@ -68,3 +68,4 @@ export type TeamUpdate = Partial<Omit<Team, 'id' | 'created_at'>> & {
 // Re-export for convenience
 export type { Team as default }
 
+

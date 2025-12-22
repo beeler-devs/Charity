@@ -8,7 +8,44 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase/client'
-import { Event, RosterMember, Availability } from '@/types/database.types'
+// Types defined inline
+type Event = {
+  id: string
+  team_id: string
+  event_name: string
+  date: string
+  time: string
+  location?: string | null
+  description?: string | null
+  event_type?: string | null
+  duration?: number | null
+  recurrence_series_id?: string | null
+  recurrence_pattern?: string | null
+  recurrence_end_date?: string | null
+  recurrence_occurrences?: number | null
+  recurrence_original_date?: string | null
+  [key: string]: any
+}
+
+type RosterMember = {
+  id: string
+  team_id: string
+  user_id?: string | null
+  full_name: string
+  email?: string | null
+  phone?: string | null
+  ntrp_rating?: number | null
+  [key: string]: any
+}
+
+type Availability = {
+  id: string
+  roster_member_id: string
+  event_id?: string | null
+  match_id?: string | null
+  status: string
+  [key: string]: any
+}
 import { formatDate, formatTime } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { getEventTypeLabel, getEventTypeBadgeClass } from '@/lib/event-type-colors'
@@ -65,6 +102,7 @@ export default function EventDetailPage() {
   const [loading, setLoading] = useState(true)
   const [isCaptain, setIsCaptain] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
+  const [initialEditScope, setInitialEditScope] = useState<'series' | 'single' | undefined>(undefined)
   const [isEditing, setIsEditing] = useState(false)
   const [editedEvent, setEditedEvent] = useState<Partial<Event>>({})
   const [saving, setSaving] = useState(false)
@@ -444,65 +482,71 @@ export default function EventDetailPage() {
               )}
             </div>
             <div className="space-y-2 text-sm">
-              <div className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-muted-foreground" />
-                {isEditing ? (
-                  <Input
-                    type="date"
-                    value={editedEvent.date || ''}
-                    onChange={(e) => setEditedEvent({ ...editedEvent, date: e.target.value })}
-                    className="flex-1"
-                  />
-                ) : (
-                  formatDate(event.date, 'EEEE, MMMM d, yyyy')
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                {isEditing ? (
-                  <Input
-                    type="time"
-                    value={editedEvent.time || ''}
-                    onChange={(e) => setEditedEvent({ ...editedEvent, time: e.target.value })}
-                    className="flex-1"
-                  />
-                ) : (
-                  formatTime(event.time)
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Timer className="h-4 w-4 text-muted-foreground" />
-                {isEditing ? (
-                  <Input
-                    type="number"
-                    placeholder="Duration (minutes)"
-                    value={editedEvent.duration?.toString() || ''}
-                    onChange={(e) => setEditedEvent({ ...editedEvent, duration: e.target.value ? parseInt(e.target.value) : null })}
-                    className="flex-1"
-                    min="0"
-                  />
-                ) : (
-                  (event as any).duration ? (
-                    <span>
-                      {(() => {
-                        const hours = Math.floor((event as any).duration / 60)
-                        const minutes = (event as any).duration % 60
-                        if (hours > 0 && minutes > 0) {
-                          return `${hours}h ${minutes}m`
-                        } else if (hours > 0) {
-                          return `${hours}h`
-                        } else {
-                          return `${minutes}m`
-                        }
-                      })()}
-                    </span>
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground font-medium">Date:</span>
+                  {isEditing ? (
+                    <Input
+                      type="date"
+                      value={editedEvent.date || ''}
+                      onChange={(e) => setEditedEvent({ ...editedEvent, date: e.target.value })}
+                      className="flex-1"
+                    />
                   ) : (
-                    <span className="text-muted-foreground">No duration set</span>
-                  )
-                )}
+                    <span>{formatDate(event.date, 'EEEE, MMMM d, yyyy')}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground font-medium">Time:</span>
+                  {isEditing ? (
+                    <Input
+                      type="time"
+                      value={editedEvent.time || ''}
+                      onChange={(e) => setEditedEvent({ ...editedEvent, time: e.target.value })}
+                      className="flex-1"
+                    />
+                  ) : (
+                    <span>{formatTime(event.time)}</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Timer className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-muted-foreground font-medium">Duration:</span>
+                  {isEditing ? (
+                    <Input
+                      type="number"
+                      placeholder="Duration (minutes)"
+                      value={editedEvent.duration?.toString() || ''}
+                      onChange={(e) => setEditedEvent({ ...editedEvent, duration: e.target.value ? parseInt(e.target.value) : null })}
+                      className="flex-1"
+                      min="0"
+                    />
+                  ) : (
+                    (event as any).duration ? (
+                      <span>
+                        {(() => {
+                          const hours = Math.floor((event as any).duration / 60)
+                          const minutes = (event as any).duration % 60
+                          if (hours > 0 && minutes > 0) {
+                            return `${hours}h ${minutes}m`
+                          } else if (hours > 0) {
+                            return `${hours}h`
+                          } else {
+                            return `${minutes}m`
+                          }
+                        })()}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">No duration set</span>
+                    )
+                  )}
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground font-medium">Location:</span>
                 {isEditing ? (
                   <Input
                     value={editedEvent.location || ''}
@@ -511,11 +555,12 @@ export default function EventDetailPage() {
                     placeholder="Location"
                   />
                 ) : (
-                  event.location || <span className="text-muted-foreground">No location</span>
+                  <span>{event.location || <span className="text-muted-foreground">No location</span>}</span>
                 )}
               </div>
             </div>
             <div className="pt-2 border-t">
+              <div className="text-muted-foreground font-medium text-sm mb-2">Description:</div>
               {isEditing ? (
                 <Textarea
                   value={editedEvent.description || ''}
@@ -524,10 +569,12 @@ export default function EventDetailPage() {
                   rows={4}
                 />
               ) : (
-                event.description && (
+                event.description ? (
                   <p className="text-sm text-muted-foreground whitespace-pre-wrap">
                     {event.description}
                   </p>
+                ) : (
+                  <span className="text-sm text-muted-foreground">No description</span>
                 )
               )}
             </div>
@@ -554,7 +601,7 @@ export default function EventDetailPage() {
                   onClick={handleCancelEdit}
                   variant="outline"
                   disabled={saving}
-                  className="flex-1"
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 border-gray-300"
                 >
                   <XCircle className="h-4 w-4 mr-2" />
                   Cancel
@@ -635,14 +682,30 @@ export default function EventDetailPage() {
               Edit Event
             </Button>
             {(event as any).recurrence_series_id && (
-              <Button
-                variant="outline"
-                className="flex-1"
-                onClick={() => setShowEditDialog(true)}
-              >
-                <Edit className="h-4 w-4 mr-2" />
-                Edit Series
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setInitialEditScope('series')
+                    setShowEditDialog(true)
+                  }}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Series
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    setInitialEditScope('single')
+                    setShowEditDialog(true)
+                  }}
+                >
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit This Occurrence
+                </Button>
+              </>
             )}
             <Button
               variant="destructive"
@@ -701,11 +764,6 @@ export default function EventDetailPage() {
                 {attendees.available.map(({ rosterMember }) => (
                   <div key={rosterMember.id} className="flex items-center justify-between text-sm">
                     <span>{rosterMember.full_name}</span>
-                    {rosterMember.ntrp_rating && (
-                      <Badge variant="outline" className="text-xs">
-                        {rosterMember.ntrp_rating}
-                      </Badge>
-                    )}
                   </div>
                 ))}
               </div>
@@ -726,11 +784,6 @@ export default function EventDetailPage() {
                 {attendees.maybe.map(({ rosterMember }) => (
                   <div key={rosterMember.id} className="flex items-center justify-between text-sm">
                     <span>{rosterMember.full_name}</span>
-                    {rosterMember.ntrp_rating && (
-                      <Badge variant="outline" className="text-xs">
-                        {rosterMember.ntrp_rating}
-                      </Badge>
-                    )}
                   </div>
                 ))}
               </div>
@@ -751,11 +804,6 @@ export default function EventDetailPage() {
                 {attendees.late.map(({ rosterMember }) => (
                   <div key={rosterMember.id} className="flex items-center justify-between text-sm">
                     <span>{rosterMember.full_name}</span>
-                    {rosterMember.ntrp_rating && (
-                      <Badge variant="outline" className="text-xs">
-                        {rosterMember.ntrp_rating}
-                      </Badge>
-                    )}
                   </div>
                 ))}
               </div>
@@ -776,11 +824,6 @@ export default function EventDetailPage() {
                 {attendees.unavailable.map(({ rosterMember }) => (
                   <div key={rosterMember.id} className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{rosterMember.full_name}</span>
-                    {rosterMember.ntrp_rating && (
-                      <Badge variant="outline" className="text-xs">
-                        {rosterMember.ntrp_rating}
-                      </Badge>
-                    )}
                   </div>
                 ))}
               </div>
@@ -809,13 +852,20 @@ export default function EventDetailPage() {
       {event && (
         <EditEventDialog
           open={showEditDialog}
-          onOpenChange={setShowEditDialog}
+          onOpenChange={(open) => {
+            setShowEditDialog(open)
+            if (!open) {
+              setInitialEditScope(undefined) // Reset when dialog closes
+            }
+          }}
           event={event}
           teamId={teamId}
           onUpdated={() => {
             loadEventData()
             setShowEditDialog(false)
+            setInitialEditScope(undefined)
           }}
+          initialEditScope={initialEditScope}
         />
       )}
 

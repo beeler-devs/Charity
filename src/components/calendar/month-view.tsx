@@ -4,6 +4,9 @@ import { CalendarDay, CalendarItem, getMonthDays, groupItemsByDate, getWeekdayNa
 import { CalendarItemTile } from './calendar-item-tile'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { format } from 'date-fns'
 import {
   Sheet,
   SheetContent,
@@ -15,19 +18,49 @@ import {
 interface MonthViewProps {
   currentDate: Date
   items: CalendarItem[]
+  onPrevious?: () => void
+  onNext?: () => void
 }
 
-export function MonthView({ currentDate, items }: MonthViewProps) {
+export function MonthView({ currentDate, items, onPrevious, onNext }: MonthViewProps) {
   const monthDays = getMonthDays(currentDate)
   const weekdayNames = getWeekdayNames(true)
   const itemsByDate = groupItemsByDate(items)
   const [selectedDay, setSelectedDay] = useState<CalendarDay | null>(null)
 
   const selectedDayItems = selectedDay ? (itemsByDate[selectedDay.dateString] || []) : []
+  const monthName = format(currentDate, 'MMMM yyyy')
 
   return (
     <>
       <div className="space-y-2">
+        {/* Month name and navigation */}
+        <div className="flex items-center justify-center gap-3 mb-2">
+          {onPrevious && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onPrevious}
+              className="h-8 w-8"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+          )}
+          <h3 className="text-lg font-semibold min-w-[140px] text-center">
+            {monthName}
+          </h3>
+          {onNext && (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={onNext}
+              className="h-8 w-8"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+
         {/* Weekday headers */}
         <div className="grid grid-cols-7 gap-1">
           {weekdayNames.map((name) => (

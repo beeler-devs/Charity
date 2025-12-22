@@ -45,3 +45,4 @@ After fixing, ensure:
 - ✅ The function `link_roster_members_to_user` exists and is accessible
 - ✅ Future signups will automatically link (test with a new user)
 
+
