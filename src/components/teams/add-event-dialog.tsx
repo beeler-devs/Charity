@@ -32,23 +32,26 @@ import { VenueDialog } from '@/components/teams/venue-dialog'
 interface AddEventDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  teamId: string
+  teamId?: string // Optional - if not provided, will show team selector
   onAdded: () => void
+  availableTeams?: Array<{ id: string; name: string }> // Teams user can create events for
 }
 
 export function AddEventDialog({
   open,
   onOpenChange,
-  teamId,
+  teamId: initialTeamId,
   onAdded,
+  availableTeams = [],
 }: AddEventDialogProps) {
+  const [selectedTeamId, setSelectedTeamId] = useState<string>(initialTeamId || '')
   const [eventName, setEventName] = useState('')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
-  const [duration, setDuration] = useState('')
+  const [duration, setDuration] = useState('60')
   const [location, setLocation] = useState('')
   const [description, setDescription] = useState('')
-  const [eventType, setEventType] = useState<EventType | ''>('')
+  const [eventType, setEventType] = useState<EventType>('other')
   const [isRecurring, setIsRecurring] = useState(false)
   const [recurrencePattern, setRecurrencePattern] = useState<'daily' | 'weekly' | 'custom'>('weekly')
   const [endType, setEndType] = useState<'date' | 'occurrences'>('date')
@@ -62,14 +65,25 @@ export function AddEventDialog({
   const [isCaptain, setIsCaptain] = useState(false)
   const { toast } = useToast()
 
+  // Sync selectedTeamId when initialTeamId changes
   useEffect(() => {
-    if (open) {
+    if (initialTeamId) {
+      setSelectedTeamId(initialTeamId)
+    } else if (availableTeams.length > 0 && !selectedTeamId) {
+      setSelectedTeamId(availableTeams[0].id)
+    }
+  }, [initialTeamId, availableTeams])
+
+  useEffect(() => {
+    if (open && selectedTeamId) {
       loadVenues()
       checkCaptainStatus()
     }
-  }, [open, teamId])
+  }, [open, selectedTeamId])
 
   async function checkCaptainStatus() {
+    if (!selectedTeamId) return
+    
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     
@@ -78,10 +92,12 @@ export function AddEventDialog({
       return
     }
 
+    if (!selectedTeamId) return
+    
     const { data: teamData } = await supabase
       .from('teams')
       .select('captain_id, co_captain_id')
-      .eq('id', teamId)
+      .eq('id', selectedTeamId)
       .single()
 
     if (teamData && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
@@ -107,7 +123,7 @@ export function AddEventDialog({
     const { data: teamVenues } = await supabase
       .from('venues')
       .select('*')
-      .eq('team_id', teamId)
+      .eq('team_id', selectedTeamId)
       .order('name', { ascending: true })
 
     const allVenues = [
@@ -122,10 +138,10 @@ export function AddEventDialog({
     setEventName('')
     setDate('')
     setTime('')
-    setDuration('')
+    setDuration('60')
     setLocation('')
     setDescription('')
-    setEventType('')
+    setEventType('other')
     setIsRecurring(false)
     setRecurrencePattern('weekly')
     setEndType('date')
@@ -174,10 +190,19 @@ export function AddEventDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
 
-    if (!eventName || !date || !time) {
+    if (!selectedTeamId) {
       toast({
         title: 'Error',
-        description: 'Please fill in all required fields (Event Name, Date, Time)',
+        description: 'Please select a team',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    if (!eventName || !date || !time || !eventType) {
+      toast({
+        title: 'Error',
+        description: 'Please fill in all required fields (Event Name, Date, Time, Event Type)',
         variant: 'destructive',
       })
       return
@@ -238,7 +263,7 @@ export function AddEventDialog({
       const { data: teamData } = await supabase
         .from('teams')
         .select('captain_id, co_captain_id')
-        .eq('id', teamId)
+        .eq('id', selectedTeamId)
         .single()
 
       if (!teamData || (teamData.captain_id !== user.id && teamData.co_captain_id !== user.id)) {
@@ -268,11 +293,11 @@ export function AddEventDialog({
       // Build event objects conditionally based on whether recurrence columns exist
       const eventsToCreate = dates.map((eventDate, index) => {
         const baseEvent: any = {
-          team_id: teamId,
+          team_id: selectedTeamId,
           event_name: eventName,
           date: eventDate,
           time,
-          duration: duration ? parseInt(duration) : null,
+          duration: duration ? parseInt(duration) : 60,
           location: location || null,
           description: description || null,
           event_type: eventType || null,
@@ -344,6 +369,31 @@ export function AddEventDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          {/* Team Selection (only show if multiple teams available) */}
+          {availableTeams.length > 1 && (
+            <div className="space-y-2">
+              <Label htmlFor="teamSelect">
+                Team <span className="text-destructive">*</span>
+              </Label>
+              <Select
+                value={selectedTeamId}
+                onValueChange={setSelectedTeamId}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a team" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableTeams.map((team) => (
+                    <SelectItem key={team.id} value={team.id}>
+                      {team.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {/* Event Name */}
           <div className="space-y-2">
             <Label htmlFor="eventName">
@@ -360,13 +410,16 @@ export function AddEventDialog({
 
           {/* Event Type */}
           <div className="space-y-2">
-            <Label htmlFor="eventType">Event Type</Label>
+            <Label htmlFor="eventType">
+              Event Type <span className="text-destructive">*</span>
+            </Label>
             <Select
               value={eventType}
               onValueChange={(value) => setEventType(value as EventType)}
+              required
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select event type (optional)" />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {getEventTypes().map((type) => (
@@ -400,20 +453,34 @@ export function AddEventDialog({
               </Label>
               <div className="flex gap-2">
                 <Select
-                  value={time.split(':')[0] || ''}
-                  onValueChange={(hour) => {
-                    const minute = time.split(':')[1] || '00'
-                    setTime(`${hour}:${minute}`)
+                  value={(() => {
+                    const [hour, minute] = time.split(':')
+                    const hourNum = parseInt(hour || '0')
+                    const displayHour = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum
+                    return displayHour.toString()
+                  })()}
+                  onValueChange={(hourStr) => {
+                    const [currentHour, minute] = time.split(':')
+                    const currentHourNum = parseInt(currentHour || '0')
+                    const isPM = currentHourNum >= 12
+                    const hourNum = parseInt(hourStr)
+                    let newHour = hourNum
+                    if (hourNum === 12) {
+                      newHour = isPM ? 12 : 0
+                    } else {
+                      newHour = isPM ? hourNum + 12 : hourNum
+                    }
+                    setTime(`${newHour.toString().padStart(2, '0')}:${minute || '00'}`)
                   }}
                 >
                   <SelectTrigger className="w-[100px]">
                     <SelectValue placeholder="Hour" />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 24 }, (_, i) => {
-                      const hour = i.toString().padStart(2, '0')
+                    {Array.from({ length: 12 }, (_, i) => {
+                      const hour = i + 1
                       return (
-                        <SelectItem key={hour} value={hour}>
+                        <SelectItem key={hour} value={hour.toString()}>
                           {hour}
                         </SelectItem>
                       )
@@ -439,6 +506,31 @@ export function AddEventDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                <Select
+                  value={(() => {
+                    const hour = parseInt(time.split(':')[0] || '0')
+                    return hour >= 12 ? 'PM' : 'AM'
+                  })()}
+                  onValueChange={(ampm) => {
+                    const [hour, minute] = time.split(':')
+                    const hourNum = parseInt(hour || '0')
+                    let newHour = hourNum
+                    if (ampm === 'PM' && hourNum < 12) {
+                      newHour = hourNum + 12
+                    } else if (ampm === 'AM' && hourNum >= 12) {
+                      newHour = hourNum === 12 ? 0 : hourNum - 12
+                    }
+                    setTime(`${newHour.toString().padStart(2, '0')}:${minute || '00'}`)
+                  }}
+                >
+                  <SelectTrigger className="w-[80px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AM">AM</SelectItem>
+                    <SelectItem value="PM">PM</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
@@ -446,14 +538,24 @@ export function AddEventDialog({
           {/* Duration */}
           <div className="space-y-2">
             <Label htmlFor="duration">Duration (minutes)</Label>
-            <Input
-              id="duration"
-              type="number"
-              min="1"
-              placeholder="e.g., 60, 90, 120"
+            <Select
               value={duration}
-              onChange={(e) => setDuration(e.target.value)}
-            />
+              onValueChange={setDuration}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 25 }, (_, i) => {
+                  const minutes = (i + 1) * 5 // 5, 10, 15, ... 125
+                  return (
+                    <SelectItem key={minutes} value={minutes.toString()}>
+                      {minutes} minutes
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Location */}
@@ -531,13 +633,13 @@ export function AddEventDialog({
                             ))}
                         </>
                       )}
-                      {venues.filter(v => v.team_id === teamId).length > 0 && (
+                      {venues.filter(v => v.team_id === selectedTeamId).length > 0 && (
                         <>
                           <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
                             Team Venues
                           </div>
                           {venues
-                            .filter(v => v.team_id === teamId)
+                            .filter(v => v.team_id === selectedTeamId)
                             .map((venue) => (
                               <SelectItem key={venue.id} value={venue.id}>
                                 {venue.name}
@@ -683,7 +785,7 @@ export function AddEventDialog({
           open={showVenueDialog}
           onOpenChange={setShowVenueDialog}
           venue={null}
-          teamId={teamId}
+          teamId={selectedTeamId}
           onSaved={() => {
             loadVenues()
             setShowVenueDialog(false)

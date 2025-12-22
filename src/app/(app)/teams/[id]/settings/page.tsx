@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import { Header } from '@/components/layout/header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -98,6 +100,7 @@ export default function TeamSettingsPage() {
   const [maxSetsPerLine, setMaxSetsPerLine] = useState<number>(3)
   const [lineMatchTypes, setLineMatchTypes] = useState<string[]>(['Doubles Match', 'Doubles Match', 'Doubles Match'])
   const [teamColor, setTeamColor] = useState<string>('')
+  const [emailTemplate, setEmailTemplate] = useState<string>('')
 
   useEffect(() => {
     loadTeam()
@@ -154,6 +157,27 @@ export default function TeamSettingsPage() {
       
       // Load team color (if exists, otherwise use hash-based default)
       setTeamColor((data as any).color || getTeamColorName(teamId))
+      
+      // Load email template (if exists, otherwise use default)
+      const defaultTemplate = `Hi {{opponentCaptains}} –
+
+Below are the details for our {{leagueFormat}} Match on {{matchDate}} {{matchTime}} @{{venue}}.
+Please familiarize yourself, and your team, with the following policies and procedures.
+We look forward to a great match!
+
+{{teamName}}
+{{homePhones}}
+____________________________________________________________________________
+
+MATCH DAY
+Time: Court time is 75 minutes (including warmup).
+Payment: ${{feePerTeam}} per team.
+Location: {{venueAddress}}
+Warmup Courts: {{warmupPolicy}}
+
+Thank you,
+{{teamName}}`
+      setEmailTemplate((data as any).opponent_email_template || defaultTemplate)
       
       // Load line match types (convert from database format to display format)
       const matchTypeMap: Record<string, string> = {
@@ -299,6 +323,8 @@ export default function TeamSettingsPage() {
       line_match_types: lineMatchTypesDb,
       // Team color (requires database migration to add color column)
       color: teamColor || null,
+      // Email template for opponent captain
+      opponent_email_template: emailTemplate || null,
     }
 
     // Handle facility
@@ -330,8 +356,8 @@ export default function TeamSettingsPage() {
         title: 'Settings saved',
         description: 'Team settings have been updated',
       })
-      // Navigate back to previous screen
-      router.back()
+      // Navigate to teams page to see updated colors
+      router.push('/teams')
     }
   }
 
@@ -348,6 +374,13 @@ export default function TeamSettingsPage() {
       <Header title="Team Settings" />
 
       <main className="flex-1 p-4 space-y-4">
+        {/* Back to Teams Button */}
+        <Link href="/teams">
+          <Button variant="ghost" size="sm" className="mb-2">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Teams
+          </Button>
+        </Link>
         <Card>
           <CardHeader className="p-4 pb-2">
             <CardTitle className="text-sm">Basic Info</CardTitle>
@@ -478,6 +511,26 @@ export default function TeamSettingsPage() {
                       Selected: {teamColor.charAt(0).toUpperCase() + teamColor.slice(1)}
                     </p>
                   )}
+                </div>
+              </div>
+
+              {/* Email Template Section */}
+              <div className="space-y-4 border-b pb-4">
+                <h3 className="text-base font-semibold">Email Template for Opponent Captain</h3>
+                <div className="space-y-2">
+                  <Label htmlFor="emailTemplate">Welcome Email Template</Label>
+                  <p className="text-sm text-muted-foreground">
+                    Customize the email template sent to opponent captains. Use placeholders: {'{'}
+                    {'{'}opponentCaptains{'}'}, {'{'}{'{'}leagueFormat{'}'}, {'{'}{'{'}matchDate{'}'}, {'{'}{'{'}matchTime{'}'}, {'{'}{'{'}venue{'}'}, {'{'}{'{'}teamName{'}'}, {'{'}{'{'}homePhones{'}'}, {'{'}{'{'}feePerTeam{'}'}, {'{'}{'{'}venueAddress{'}'}, {'{'}{'{'}warmupPolicy{'}'}
+                  </p>
+                  <Textarea
+                    id="emailTemplate"
+                    value={emailTemplate}
+                    onChange={(e) => setEmailTemplate(e.target.value)}
+                    rows={15}
+                    className="font-mono text-sm"
+                    placeholder="Enter email template..."
+                  />
                 </div>
               </div>
 

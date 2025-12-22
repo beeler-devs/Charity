@@ -99,6 +99,7 @@ export default function EventDetailPage() {
   const teamId = params.id as string
   const eventId = params.eventId as string
   const [event, setEvent] = useState<Event | null>(null)
+  const [teamName, setTeamName] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [isCaptain, setIsCaptain] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
@@ -134,7 +135,7 @@ export default function EventDetailPage() {
 
     const { data: eventData } = await supabase
       .from('events')
-      .select('*')
+      .select('*, teams!inner(id, name)')
       .eq('id', eventId)
       .single()
     
@@ -500,16 +501,23 @@ export default function EventDetailPage() {
         <Card>
           <CardContent className="p-4 space-y-3">
             <div className="flex items-center justify-between">
-              {isEditing ? (
-                <Input
-                  value={editedEvent.event_name || ''}
-                  onChange={(e) => setEditedEvent({ ...editedEvent, event_name: e.target.value })}
-                  className="text-lg font-semibold"
-                  placeholder="Event name"
-                />
-              ) : (
-                <h2 className="text-lg font-semibold">{event.event_name}</h2>
-              )}
+              <div className="flex-1">
+                {isEditing ? (
+                  <Input
+                    value={editedEvent.event_name || ''}
+                    onChange={(e) => setEditedEvent({ ...editedEvent, event_name: e.target.value })}
+                    className="text-lg font-semibold"
+                    placeholder="Event name"
+                  />
+                ) : (
+                  <>
+                    <h2 className="text-lg font-semibold">{event.event_name}</h2>
+                    {teamName && (
+                      <p className="text-sm text-muted-foreground mt-1">Team: {teamName}</p>
+                    )}
+                  </>
+                )}
+              </div>
               {!isEditing && (
                 <Badge 
                   variant="secondary" 
@@ -731,7 +739,7 @@ export default function EventDetailPage() {
               <Users className="h-4 w-4 mr-2" />
               Manage Availability
             </Button>
-            {isCaptain && (
+            {isCaptain && !isEditing && (
               <>
                 <Button
                   variant="outline"
@@ -742,6 +750,36 @@ export default function EventDetailPage() {
                   Edit Event
                 </Button>
               </>
+            )}
+            {isEditing && (
+              <div className="flex gap-2 w-full">
+                <Button
+                  onClick={handleSaveChanges}
+                  disabled={saving || !editedEvent.event_name || !editedEvent.date || !editedEvent.time}
+                  className="flex-1"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="h-4 w-4 mr-2" />
+                      Save Changes
+                    </>
+                  )}
+                </Button>
+                <Button
+                  onClick={handleCancelEdit}
+                  variant="outline"
+                  disabled={saving}
+                  className="flex-1"
+                >
+                  <XCircle className="h-4 w-4 mr-2" />
+                  Cancel
+                </Button>
+              </div>
             )}
             {(event as any).recurrence_series_id && (
               <>
@@ -902,6 +940,8 @@ export default function EventDetailPage() {
             loadEventData()
             setShowEditDialog(false)
             setInitialEditScope(undefined)
+            // Navigate back to the previous page (calendar, teams page, etc.)
+            router.back()
           }}
           initialEditScope={initialEditScope}
         />

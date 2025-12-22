@@ -16,12 +16,19 @@ export interface CalendarItem {
   type: 'match' | 'event'
   date: string // YYYY-MM-DD
   time: string
+  duration?: number | null // Duration in minutes (for events)
   teamId: string
   teamName: string
   teamColor?: string | null // Saved team color from database
   name: string // opponent name for match, event name for event
   availabilityStatus?: 'available' | 'unavailable' | 'maybe' | 'late'
   eventType?: EventType // Only for events
+  availabilitySummary?: {
+    available: number
+    maybe: number
+    unavailable: number
+    total: number
+  }
 }
 
 /**

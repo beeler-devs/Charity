@@ -11,7 +11,31 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { createClient } from '@/lib/supabase/client'
-import { Match, Team } from '@/types/database.types'
+import { Team } from '@/types/database.types'
+
+// Define Match type locally since it's not exported from database.types
+type Match = {
+  id: string
+  team_id: string
+  date: string
+  time: string
+  opponent_name: string
+  venue?: string | null
+  venue_address?: string | null
+  opponent_captain_name?: string | null
+  opponent_captain_email?: string | null
+  opponent_captain_phone?: string | null
+  opponent_captain_name2?: string | null
+  opponent_captain_email2?: string | null
+  opponent_captain_phone2?: string | null
+  is_home: boolean
+  warm_up_status?: 'booked' | 'none_yet' | 'no_warmup' | null
+  warm_up_time?: string | null
+  warm_up_court?: string | null
+  checklist_status?: Record<string, boolean> | null
+  duration?: number | null
+  [key: string]: any
+}
 import { formatDate, formatTime, getWarmupMessage } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import {
@@ -37,7 +61,11 @@ import {
   XCircle,
   Loader2,
   Timer,
-  Trash2
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  HelpCircle,
+  X
 } from 'lucide-react'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -75,6 +103,14 @@ export default function MatchDetailPage() {
   const [showDeleteAlert, setShowDeleteAlert] = useState(false)
   const [scoreDialogOpen, setScoreDialogOpen] = useState(false)
   const [courtScores, setCourtScores] = useState<any[]>([])
+  const [lineups, setLineups] = useState<any[]>([])
+  const [showLineup, setShowLineup] = useState(false)
+  const [availabilitySummary, setAvailabilitySummary] = useState<{
+    available: number
+    maybe: number
+    unavailable: number
+    total: number
+  }>({ available: 0, maybe: 0, unavailable: 0, total: 0 })
   const { toast } = useToast()
 
   const [warmupStatus, setWarmupStatus] = useState<'booked' | 'none_yet' | 'no_warmup'>('none_yet')
@@ -116,8 +152,12 @@ export default function MatchDetailPage() {
         venue_address: matchData.venue_address,
         opponent_captain_name: matchData.opponent_captain_name,
         opponent_captain_email: matchData.opponent_captain_email,
+        opponent_captain_phone: (matchData as any).opponent_captain_phone || null,
+        opponent_captain_name2: (matchData as any).opponent_captain_name2 || null,
+        opponent_captain_email2: (matchData as any).opponent_captain_email2 || null,
+        opponent_captain_phone2: (matchData as any).opponent_captain_phone2 || null,
         is_home: matchData.is_home,
-      })
+      } as any)
       setWarmupStatus(matchData.warm_up_status)
       setWarmupTime(matchData.warm_up_time || '')
       setWarmupCourt(matchData.warm_up_court || '')
@@ -169,6 +209,8 @@ export default function MatchDetailPage() {
 
     // Load court-by-court scores if available
     await loadCourtScores()
+    await loadLineups()
+    await loadAvailabilitySummary()
 
     setLoading(false)
 
@@ -176,6 +218,78 @@ export default function MatchDetailPage() {
     if (matchData && teamData && user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
       setIsEditing(true)
     }
+  }
+
+  async function loadLineups() {
+    const supabase = createClient()
+    
+    // Get all lineups for this match (published and unpublished)
+    const { data: lineupsData } = await supabase
+      .from('lineups')
+      .select(`
+        id,
+        court_slot,
+        player1:roster_members!lineups_player1_id_fkey(full_name),
+        player2:roster_members!lineups_player2_id_fkey(full_name)
+      `)
+      .eq('match_id', matchId)
+      .order('court_slot', { ascending: true })
+
+    if (lineupsData) {
+      setLineups(lineupsData)
+    }
+  }
+
+  async function loadAvailabilitySummary() {
+    const supabase = createClient()
+    
+    // Load all roster members for the team
+    const { data: rosterMembers } = await supabase
+      .from('roster_members')
+      .select('id')
+      .eq('team_id', teamId)
+      .eq('is_active', true)
+
+    if (!rosterMembers || rosterMembers.length === 0) {
+      setAvailabilitySummary({ available: 0, maybe: 0, unavailable: 0, total: 0 })
+      return
+    }
+
+    const rosterMemberIds = rosterMembers.map(rm => rm.id)
+
+    // Load availability for this match
+    const { data: availability } = await supabase
+      .from('availability')
+      .select('status, roster_member_id')
+      .eq('match_id', matchId)
+      .in('roster_member_id', rosterMemberIds)
+
+    let available = 0
+    let maybe = 0
+    let unavailable = 0
+
+    if (availability) {
+      availability.forEach(avail => {
+        if (avail.status === 'available') {
+          available++
+        } else if (avail.status === 'maybe' || avail.status === 'late') {
+          maybe++
+        } else {
+          unavailable++
+        }
+      })
+    }
+
+    // Count players without availability as unavailable
+    const respondedIds = new Set(availability?.map(a => a.roster_member_id) || [])
+    unavailable += rosterMemberIds.length - respondedIds.size
+
+    setAvailabilitySummary({
+      available,
+      maybe,
+      unavailable,
+      total: rosterMemberIds.length
+    })
   }
 
   async function loadCourtScores() {
@@ -388,6 +502,10 @@ Thank you`)
         venue_address: editedMatch.venue_address || null,
         opponent_captain_name: editedMatch.opponent_captain_name || null,
         opponent_captain_email: editedMatch.opponent_captain_email || null,
+        opponent_captain_phone: (editedMatch as any).opponent_captain_phone || null,
+        opponent_captain_name2: (editedMatch as any).opponent_captain_name2 || null,
+        opponent_captain_email2: (editedMatch as any).opponent_captain_email2 || null,
+        opponent_captain_phone2: (editedMatch as any).opponent_captain_phone2 || null,
         is_home: editedMatch.is_home ?? true,
       })
       .eq('id', match.id)
@@ -579,7 +697,7 @@ Thank you`)
                       value={editedMatch.opponent_captain_name || ''}
                       onChange={(e) => setEditedMatch({ ...editedMatch, opponent_captain_name: e.target.value })}
                       className="flex-1"
-                      placeholder="Opponent captain name"
+                      placeholder="Opponent team captain name"
                     />
                   </div>
                   <div className="flex items-center gap-2">
@@ -592,13 +710,41 @@ Thank you`)
                       placeholder="Opponent captain email"
                     />
                   </div>
-                </>
-              ) : (
-                match.opponent_captain_name && (
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-muted-foreground" />
-                    Captain: {match.opponent_captain_name}
+                    <Input
+                      type="tel"
+                      value={(editedMatch as any).opponent_captain_phone || ''}
+                      onChange={(e) => setEditedMatch({ ...editedMatch, opponent_captain_phone: e.target.value } as any)}
+                      className="flex-1"
+                      placeholder="Opponent captain phone"
+                    />
                   </div>
+                </>
+              ) : (
+                (match.opponent_captain_name || (match as any).opponent_captain_phone) && (
+                  <>
+                    {match.opponent_captain_name && (
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-muted-foreground font-medium">Captain:</span>
+                        <span>{match.opponent_captain_name}</span>
+                      </div>
+                    )}
+                    {match.opponent_captain_email && (
+                      <div className="flex items-center gap-2">
+                        <Mail className="h-4 w-4 text-muted-foreground" />
+                        <span>{match.opponent_captain_email}</span>
+                      </div>
+                    )}
+                    {(match as any).opponent_captain_phone && (
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-muted-foreground font-medium">Phone:</span>
+                        <span>{(match as any).opponent_captain_phone}</span>
+                      </div>
+                    )}
+                  </>
                 )
               )}
             </div>
@@ -646,14 +792,60 @@ Thank you`)
           </CardContent>
         </Card>
 
+        {/* Lineup View */}
+        {lineups.length > 0 && (
+          <Card>
+            <CardHeader className="p-4 pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm">Lineup</CardTitle>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowLineup(!showLineup)}
+                  >
+                    {showLineup ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </Button>
+                  <Link href={`/teams/${teamId}/matches/${matchId}/lineup`}>
+                    <Button variant="outline" size="sm">
+                      <ClipboardList className="h-4 w-4 mr-1" />
+                      Edit
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </CardHeader>
+            {showLineup && (
+              <CardContent className="p-4 pt-2">
+                <div className="space-y-3">
+                  {lineups.map((lineup) => (
+                    <div key={lineup.id} className="border-b last:border-b-0 pb-2 last:pb-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">Court {lineup.court_slot}</span>
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {lineup.player1?.full_name || 'TBD'}
+                        {lineup.player2 && ` & ${lineup.player2.full_name}`}
+                        {!lineup.player1 && !lineup.player2 && 'No players assigned'}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            )}
+          </Card>
+        )}
+
         {/* Quick Actions */}
         <div className="grid grid-cols-2 gap-3">
-          <Link href={`/teams/${teamId}/matches/${matchId}/lineup`}>
-            <Button variant="outline" className="w-full">
-              <ClipboardList className="h-4 w-4 mr-2" />
-              Lineup
-            </Button>
-          </Link>
+          {lineups.length === 0 && (
+            <Link href={`/teams/${teamId}/matches/${matchId}/lineup`}>
+              <Button variant="outline" className="w-full">
+                <ClipboardList className="h-4 w-4 mr-2" />
+                Lineup
+              </Button>
+            </Link>
+          )}
           <Link href={`/teams/${teamId}/availability`}>
             <Button variant="outline" className="w-full">
               <Users className="h-4 w-4 mr-2" />

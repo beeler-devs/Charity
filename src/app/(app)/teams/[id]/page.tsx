@@ -34,6 +34,7 @@ type Event = {
   [key: string]: any
 }
 import { formatDate, formatTime, cn } from '@/lib/utils'
+import { createClient } from '@/lib/supabase/client'
 import { getEventTypeLabel, getEventTypeBadgeClass } from '@/lib/event-type-colors'
 import {
   Users,
@@ -41,6 +42,7 @@ import {
   ClipboardList,
   Plus,
   ChevronRight,
+  ChevronDown,
   Settings,
   ListChecks,
   MessageCircle,
@@ -75,6 +77,8 @@ export default function TeamDetailPage() {
     ties: number
     winPercentage: number
   } | null>(null)
+  const [expandedLineups, setExpandedLineups] = useState<Record<string, boolean>>({})
+  const [matchLineups, setMatchLineups] = useState<Record<string, any[]>>({})
 
   useEffect(() => {
     loadTeamData()
@@ -399,45 +403,81 @@ export default function TeamDetailPage() {
             </Card>
           ) : (
             <div className="space-y-2">
-              {matches.map((match) => (
-                <Card 
-                  key={match.id} 
-                  className="hover:bg-accent/50 transition-colors cursor-pointer"
-                  onClick={() => router.push(`/teams/${teamId}/matches/${match.id}`)}
-                >
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-sm">
-                            vs {match.opponent_name}
-                          </span>
-                          <Badge variant={match.is_home ? 'default' : 'outline'} className="text-xs">
-                            {match.is_home ? 'Home' : 'Away'}
-                          </Badge>
+              {matches.map((match) => {
+                const lineups = matchLineups[match.id] || []
+                const isExpanded = expandedLineups[match.id] || false
+                return (
+                  <Card 
+                    key={match.id} 
+                    className="hover:bg-accent/50 transition-colors"
+                  >
+                    <CardContent className="p-3">
+                      <div 
+                        className="flex items-center justify-between cursor-pointer"
+                        onClick={() => router.push(`/teams/${teamId}/matches/${match.id}`)}
+                      >
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm">
+                              vs {match.opponent_name}
+                            </span>
+                            <Badge variant={match.is_home ? 'default' : 'outline'} className="text-xs">
+                              {match.is_home ? 'Home' : 'Away'}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(match.date, 'EEE, MMM d')} {formatTime(match.time).toLowerCase()}
+                          </p>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(match.date, 'EEE, MMM d')} {formatTime(match.time).toLowerCase()}
-                        </p>
+                        <div className="flex items-center gap-2">
+                          {lineups.length > 0 && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setExpandedLineups(prev => ({
+                                  ...prev,
+                                  [match.id]: !prev[match.id]
+                                }))
+                              }}
+                            >
+                              <ChevronDown className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-180")} />
+                            </Button>
+                          )}
+                          <Link href={`/teams/${teamId}/matches/${match.id}/lineup`}>
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="text-xs"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ClipboardList className="h-4 w-4 mr-1" />
+                              {lineups.length > 0 ? 'Edit' : 'Lineup'}
+                            </Button>
+                          </Link>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Link href={`/teams/${teamId}/matches/${match.id}/lineup`}>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="text-xs"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <ClipboardList className="h-4 w-4 mr-1" />
-                            Lineup
-                          </Button>
-                        </Link>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                      {isExpanded && lineups.length > 0 && (
+                        <div className="mt-3 pt-3 border-t space-y-2">
+                          {lineups.map((lineup) => (
+                            <div key={lineup.id} className="text-xs">
+                              <span className="font-medium">Court {lineup.court_slot}:</span>
+                              <span className="text-muted-foreground ml-1">
+                                {lineup.player1?.full_name || 'TBD'}
+                                {lineup.player2 && ` & ${lineup.player2.full_name}`}
+                                {!lineup.player1 && !lineup.player2 && ' No players assigned'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           )}
         </div>

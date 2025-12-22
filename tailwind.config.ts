@@ -7,6 +7,19 @@ const config: Config = {
     './src/components/**/*.{js,ts,jsx,tsx,mdx}',
     './src/app/**/*.{js,ts,jsx,tsx,mdx}',
   ],
+  safelist: [
+    // Team color classes - ensure they're always included
+    'bg-blue-50', 'bg-blue-500', 'border-l-blue-500', 'text-blue-500',
+    'bg-green-50', 'bg-green-500', 'border-l-green-500', 'text-green-500',
+    'bg-purple-50', 'bg-purple-500', 'border-l-purple-500', 'text-purple-500',
+    'bg-orange-50', 'bg-orange-500', 'border-l-orange-500', 'text-orange-500',
+    'bg-pink-50', 'bg-pink-500', 'border-l-pink-500', 'text-pink-500',
+    'bg-teal-50', 'bg-teal-500', 'border-l-teal-500', 'text-teal-500',
+    'bg-red-50', 'bg-red-500', 'border-l-red-500', 'text-red-500',
+    'bg-yellow-50', 'bg-yellow-500', 'border-l-yellow-500', 'text-yellow-500',
+    'bg-indigo-50', 'bg-indigo-500', 'border-l-indigo-500', 'text-indigo-500',
+    'bg-cyan-50', 'bg-cyan-500', 'border-l-cyan-500', 'text-cyan-500',
+  ],
   theme: {
     extend: {
       colors: {

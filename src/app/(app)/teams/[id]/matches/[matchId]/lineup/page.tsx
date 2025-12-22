@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { Header } from '@/components/layout/header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -37,7 +37,6 @@ import {
   User,
   Loader2
 } from 'lucide-react'
-import { LineupWizardDialog } from '@/components/teams/lineup-wizard-dialog'
 
 interface CourtSlot {
   courtNumber: number
@@ -176,6 +175,7 @@ function CourtSlotDropZone({
 
 export default function LineupBuilderPage() {
   const params = useParams()
+  const router = useRouter()
   const teamId = params.id as string
   const matchId = params.matchId as string
   const [match, setMatch] = useState<Match | null>(null)
@@ -188,7 +188,6 @@ export default function LineupBuilderPage() {
   const [availablePlayers, setAvailablePlayers] = useState<PlayerWithAvailability[]>([])
   const [loading, setLoading] = useState(true)
   const [publishing, setPublishing] = useState(false)
-  const [showWizard, setShowWizard] = useState(false)
   const [selectedSlot, setSelectedSlot] = useState<{
     courtIndex: number
     slot: 'player1' | 'player2'
@@ -649,9 +648,8 @@ export default function LineupBuilderPage() {
 
           {/* Actions - Full width below */}
           <div className="mt-4 flex gap-2">
-            <Button variant="outline" className="flex-1" onClick={() => setShowWizard(true)}>
-              <Wand2 className="h-4 w-4 mr-2" />
-              Wizard
+            <Button variant="outline" className="flex-1" onClick={() => router.back()}>
+              Cancel
             </Button>
             <Button variant="outline" className="flex-1" onClick={saveLineup}>
               Save
@@ -691,31 +689,6 @@ export default function LineupBuilderPage() {
         ) : null}
       </DragOverlay>
 
-      <LineupWizardDialog
-        open={showWizard}
-        onOpenChange={setShowWizard}
-        teamId={teamId}
-        availablePlayers={availablePlayers}
-        onApply={(suggestions) => {
-          // Apply wizard suggestions to courts
-          const newCourts = [...courts]
-          suggestions.forEach((pair, index) => {
-            if (index < 3) {
-              newCourts[index] = {
-                ...newCourts[index],
-                player1: pair.player1,
-                player2: pair.player2,
-              }
-            }
-          })
-          setCourts(newCourts)
-
-          // Remove assigned players from available
-          const assignedIds = new Set(suggestions.flatMap(p => [p.player1.id, p.player2.id]))
-          setAvailablePlayers(prev => prev.filter(p => !assignedIds.has(p.id)))
-          setShowWizard(false)
-        }}
-      />
     </DndContext>
   )
 }

@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { CalendarItem } from '@/lib/calendar-utils'
 import { getTeamColorClass } from '@/lib/team-colors'
 import { getEventTypeBadgeClass, getEventTypeLabel } from '@/lib/event-type-colors'
-import { formatTime, formatDate } from '@/lib/utils'
+import { formatTime, formatDate, calculateEndTime } from '@/lib/utils'
 import { Check, X, HelpCircle, Clock } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -77,6 +77,13 @@ export function CalendarItemTile({ item, compact = false, showDate = false }: Ca
               >
                 Warmup
               </Badge>
+            ) : item.eventType === 'social' ? (
+              <Badge 
+                variant="default" 
+                className="text-[10px] px-1 py-0 h-4 bg-pink-500"
+              >
+                Social
+              </Badge>
             ) : item.eventType ? (
               <Badge 
                 variant="secondary" 
@@ -109,7 +116,11 @@ export function CalendarItemTile({ item, compact = false, showDate = false }: Ca
           
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <p className="text-xs text-muted-foreground">
-              {formatTime(item.time)}
+              {item.type === 'event' && item.duration 
+                ? `${formatTime(item.time)}-${formatTime(calculateEndTime(item.time, item.duration))}`
+                : item.type === 'event' && !item.duration
+                ? `${formatTime(item.time)} (no end time)`
+                : formatTime(item.time)}
             </p>
             <p className={cn(
               'text-muted-foreground truncate',
@@ -117,6 +128,11 @@ export function CalendarItemTile({ item, compact = false, showDate = false }: Ca
             )}>
               {item.teamName}
             </p>
+            {item.availabilitySummary && !compact && (
+              <p className="text-xs text-muted-foreground">
+                • {item.availabilitySummary.available} available
+              </p>
+            )}
           </div>
         </div>
       </div>

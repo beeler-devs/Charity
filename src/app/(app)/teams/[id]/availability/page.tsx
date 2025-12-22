@@ -85,7 +85,7 @@ export default function AvailabilityPage() {
   const [saving, setSaving] = useState(false)
   const [teamName, setTeamName] = useState<string>('')
   const [teamColor, setTeamColor] = useState<string | null>(null)
-  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match']) // Default to matches only
+  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match', 'practice', 'warmup', 'other']) // Default to all
   const [openPopovers, setOpenPopovers] = useState<Record<string, boolean>>({})
   const [pendingChanges, setPendingChanges] = useState<Record<string, Record<string, 'available' | 'unavailable' | 'maybe' | 'last_resort'>>>({})
   const [bulkAvailabilityDialog, setBulkAvailabilityDialog] = useState<{
@@ -288,9 +288,13 @@ export default function AvailabilityPage() {
         }
       })
       
-      // For events, we don't have a "players needed" calculation, so use a default
+      // For events, use total team members (for practices, show X/Y format)
       // For matches, use the calculated playersNeeded
-      const totalNeeded = item.type === 'match' ? playersNeeded : 1 // Events default to 1 for now
+      const totalNeeded = item.type === 'match' 
+        ? playersNeeded 
+        : (item.type === 'event' && (item as any).event_type === 'practice' 
+          ? playerIds.length // For practices, use total team members
+          : 1) // Other events default to 1
       availabilityCounts[itemId] = { available, total: totalNeeded }
     })
 
@@ -702,27 +706,46 @@ export default function AvailabilityPage() {
                     HISTORY
                   </th>
                   {getDisplayedItems().map((item, index) => {
-                    const eventType = item.type === 'event' ? (item as any).event_type : null
+                    const eventType = item.type === 'event' ? ((item as any).event_type || 'other') : null
                     const isPractice = eventType === 'practice'
                     const isWarmup = eventType === 'warmup'
+                    const isSocial = eventType === 'social'
+                    const isOther = eventType === 'other' || !eventType
                     return (
                       <th 
                         key={item.id} 
                         className={cn(
-                          "p-2 text-center text-sm font-medium border-r min-w-[140px] bg-gray-50 relative",
-                          getTeamColorClass(item.team_id, 'border'),
-                          "border-l-4"
+                          "p-2 text-center text-sm font-medium border-r min-w-[140px] relative border-l-4",
+                          item.type === 'match' 
+                            ? "bg-gray-50 border-l-gray-500"
+                            : isPractice
+                            ? "bg-blue-50 border-l-blue-500"
+                            : isWarmup
+                            ? "bg-orange-50 border-l-orange-500"
+                            : isSocial
+                            ? "bg-pink-50 border-l-pink-500"
+                            : isOther
+                            ? cn("bg-gray-50", getTeamColorClass(item.team_id, 'border', teamColor))
+                            : cn("bg-gray-50", getTeamColorClass(item.team_id, 'border', teamColor))
                         )}
                       >
                         <div className="flex items-center justify-center gap-1">
                           {item.type === 'match' ? (
-                            <>MATCH {index + 1} {(item as Match).is_home ? '(H)' : '(A)'}</>
+                            <Badge variant="default" className="text-xs">MATCH {index + 1} {(item as Match).is_home ? '(H)' : '(A)'}</Badge>
                           ) : isPractice ? (
-                            <>PRACTICE {index + 1}</>
+                            <Badge variant="default" className="text-xs bg-blue-500 text-white">PRACTICE {index + 1}</Badge>
                           ) : isWarmup ? (
-                            <>WARMUP {index + 1}</>
+                            <Badge variant="default" className="text-xs bg-orange-500 text-white">WARMUP {index + 1}</Badge>
+                          ) : isSocial ? (
+                            <Badge variant="default" className="text-xs bg-pink-500 text-white">SOCIAL {index + 1}</Badge>
+                          ) : eventType ? (
+                            <Badge variant="secondary" className={cn("text-xs", getEventTypeBadgeClass(eventType as any))}>
+                              {getEventTypeLabel(eventType as any)} {index + 1}
+                            </Badge>
                           ) : (
-                            <>EVENT {index + 1}</>
+                            <Badge variant="secondary" className="text-xs bg-gray-100 text-gray-800">
+                              EVENT {index + 1}
+                            </Badge>
                           )}
                           {isCaptain && (
                             <Button
@@ -768,7 +791,8 @@ export default function AvailabilityPage() {
                       }
                     })
                     
-                    // Format: "1-2-26 @7:45P"
+                    // Format: "Mon 1-2-26 @7:45P"
+                    const dayOfWeek = formatDate(item.date, 'EEE')
                     const itemDate = formatDate(item.date, 'M-d-yy')
                     const timeStr = formatTime(item.time)
                     const timeParts = timeStr.split(':')
@@ -776,7 +800,7 @@ export default function AvailabilityPage() {
                     const minute = timeParts[1].split(' ')[0]
                     const ampm = timeStr.includes('AM') ? 'A' : 'P'
                     const formattedTime = `${hour}:${minute}${ampm}`
-                    const dateTimeText = `${itemDate} @${formattedTime}`
+                    const dateTimeText = `${dayOfWeek} ${itemDate} @${formattedTime}`
                     
                     return (
                       <th 
@@ -801,7 +825,16 @@ export default function AvailabilityPage() {
                           "text-xs font-medium",
                           availableCount >= baseCount.total ? "text-green-600" : "text-red-600"
                         )}>
-                          {availableCount} of {baseCount.total}
+                          {(() => {
+                            const eventType = item.type === 'event' ? (item as any).event_type : null
+                            const isPractice = eventType === 'practice'
+                            // For practices, show X/Y format (available/total team members)
+                            if (isPractice) {
+                              return `${availableCount}/${data.players.length}`
+                            }
+                            // For matches and other events, show X of Y format
+                            return `${availableCount} of ${baseCount.total}`
+                          })()}
                         </div>
                       </th>
                     )

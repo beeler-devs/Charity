@@ -23,8 +23,18 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Trash2 } from 'lucide-react'
 import { addDays, addWeeks, format, parseISO, isBefore, isAfter } from 'date-fns'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 // Event type defined inline
 type Event = {
   id: string
@@ -78,6 +88,8 @@ export function EditEventDialog({
   const [editScope, setEditScope] = useState<'series' | 'single'>('series')
   const [seriesEvents, setSeriesEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(false)
+  const [showDeleteSeriesDialog, setShowDeleteSeriesDialog] = useState(false)
+  const [deletingSeries, setDeletingSeries] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -411,6 +423,16 @@ export function EditEventDialog({
                   </SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowDeleteSeriesDialog(true)}
+                className="w-full mt-2"
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Delete Entire Series
+              </Button>
             </div>
           )}
 
@@ -470,20 +492,34 @@ export function EditEventDialog({
               </Label>
               <div className="flex gap-2">
                 <Select
-                  value={time.split(':')[0] || ''}
-                  onValueChange={(hour) => {
-                    const minute = time.split(':')[1] || '00'
-                    setTime(`${hour}:${minute}`)
+                  value={(() => {
+                    const [hour, minute] = time.split(':')
+                    const hourNum = parseInt(hour || '0')
+                    const displayHour = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum
+                    return displayHour.toString()
+                  })()}
+                  onValueChange={(hourStr) => {
+                    const [currentHour, minute] = time.split(':')
+                    const currentHourNum = parseInt(currentHour || '0')
+                    const isPM = currentHourNum >= 12
+                    const hourNum = parseInt(hourStr)
+                    let newHour = hourNum
+                    if (hourNum === 12) {
+                      newHour = isPM ? 12 : 0
+                    } else {
+                      newHour = isPM ? hourNum + 12 : hourNum
+                    }
+                    setTime(`${newHour.toString().padStart(2, '0')}:${minute || '00'}`)
                   }}
                 >
                   <SelectTrigger className="w-[100px]">
                     <SelectValue placeholder="Hour" />
                   </SelectTrigger>
                   <SelectContent>
-                    {Array.from({ length: 24 }, (_, i) => {
-                      const hour = i.toString().padStart(2, '0')
+                    {Array.from({ length: 12 }, (_, i) => {
+                      const hour = i + 1
                       return (
-                        <SelectItem key={hour} value={hour}>
+                        <SelectItem key={hour} value={hour.toString()}>
                           {hour}
                         </SelectItem>
                       )
@@ -507,6 +543,31 @@ export function EditEventDialog({
                         {minute}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={(() => {
+                    const hour = parseInt(time.split(':')[0] || '0')
+                    return hour >= 12 ? 'PM' : 'AM'
+                  })()}
+                  onValueChange={(ampm) => {
+                    const [hour, minute] = time.split(':')
+                    const hourNum = parseInt(hour || '0')
+                    let newHour = hourNum
+                    if (ampm === 'PM' && hourNum < 12) {
+                      newHour = hourNum + 12
+                    } else if (ampm === 'AM' && hourNum >= 12) {
+                      newHour = hourNum === 12 ? 0 : hourNum - 12
+                    }
+                    setTime(`${newHour.toString().padStart(2, '0')}:${minute || '00'}`)
+                  }}
+                >
+                  <SelectTrigger className="w-[80px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AM">AM</SelectItem>
+                    <SelectItem value="PM">PM</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -658,6 +719,63 @@ export function EditEventDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      {/* Delete Series Confirmation Dialog */}
+      <AlertDialog open={showDeleteSeriesDialog} onOpenChange={setShowDeleteSeriesDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Entire Series?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will delete all events in this recurring series ({seriesEvents.length} total events). This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingSeries}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (!event?.recurrence_series_id) return
+                
+                setDeletingSeries(true)
+                const supabase = createClient()
+                
+                // Delete all events in the series
+                const { error } = await supabase
+                  .from('events')
+                  .delete()
+                  .eq('recurrence_series_id', event.recurrence_series_id)
+                
+                if (error) {
+                  toast({
+                    title: 'Error',
+                    description: error.message,
+                    variant: 'destructive',
+                  })
+                  setDeletingSeries(false)
+                } else {
+                  toast({
+                    title: 'Series deleted',
+                    description: 'All events in the series have been deleted',
+                  })
+                  setShowDeleteSeriesDialog(false)
+                  onUpdated()
+                  onOpenChange(false)
+                }
+              }}
+              disabled={deletingSeries}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingSeries ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete Series'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   )
 }

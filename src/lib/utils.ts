@@ -16,7 +16,26 @@ export function formatTime(time: string): string {
   const hour = parseInt(hours, 10)
   const ampm = hour >= 12 ? 'PM' : 'AM'
   const formattedHour = hour % 12 || 12
-  return `${formattedHour}:${minutes} ${ampm}`
+  return `${formattedHour}:${minutes}${minutes === '00' ? '' : ''} ${ampm}`
+}
+
+export function calculateEndTime(startTime: string, durationMinutes: number | null | undefined): string {
+  if (!durationMinutes) return startTime
+  
+  const [hours, minutes] = startTime.split(':')
+  const startHour = parseInt(hours, 10)
+  const startMinute = parseInt(minutes, 10)
+  
+  const totalMinutes = startHour * 60 + startMinute + durationMinutes
+  const endHour = Math.floor(totalMinutes / 60) % 24
+  const endMinute = totalMinutes % 60
+  
+  // Handle case where endMinute is exactly 60 (should be 0 with hour incremented)
+  // This shouldn't happen with proper modulo, but ensure clean output
+  const finalHour = endMinute === 60 ? (endHour + 1) % 24 : endHour
+  const finalMinute = endMinute === 60 ? 0 : endMinute
+  
+  return `${finalHour.toString().padStart(2, '0')}:${finalMinute.toString().padStart(2, '0')}`
 }
 
 export function getWarmupMessage(

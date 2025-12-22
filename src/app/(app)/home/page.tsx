@@ -80,7 +80,7 @@ export default function HomePage() {
   const [upcomingMatches, setUpcomingMatches] = useState<UpcomingMatch[]>([])
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([])
   const [allItems, setAllItems] = useState<CalendarItem[]>([])
-  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match', 'practice', 'warmup'])
+  const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match', 'practice', 'warmup', 'social', 'other'])
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(true)
@@ -727,6 +727,20 @@ export default function HomePage() {
           <CardContent className="p-3">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-medium text-muted-foreground">Show:</span>
+              <Button
+                variant={(() => {
+                  const allTypes = ['match', 'practice', 'warmup', 'social', 'other']
+                  return allTypes.every(type => selectedEventTypes.includes(type)) ? 'default' : 'outline'
+                })()}
+                size="sm"
+                onClick={() => {
+                  // "All" means select all event types
+                  const allTypes = ['match', 'practice', 'warmup', 'social', 'other']
+                  setSelectedEventTypes(allTypes)
+                }}
+              >
+                All
+              </Button>
               <Button
                 variant={selectedEventTypes.includes('match') ? 'default' : 'outline'}
                 size="sm"
