@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -54,8 +54,65 @@ export function AddMatchDialog({
   // CSV import state
   const [csvText, setCsvText] = useState('')
   
+  // Team facility state
+  const [teamFacilityName, setTeamFacilityName] = useState<string | null>(null)
+  const [teamFacilityAddress, setTeamFacilityAddress] = useState<string | null>(null)
+  
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
+
+  // Load team facility when dialog opens
+  useEffect(() => {
+    if (open) {
+      loadTeamFacility()
+    }
+  }, [open, teamId])
+
+  // Update venue when isHome changes or team facility is loaded
+  useEffect(() => {
+    if (isHome === 'true' && teamFacilityName) {
+      setVenue(teamFacilityName)
+      if (teamFacilityAddress) {
+        setVenueAddress(teamFacilityAddress)
+      }
+    } else if (isHome === 'false') {
+      // Clear venue for away matches
+      setVenue('')
+      setVenueAddress('')
+    }
+  }, [isHome, teamFacilityName, teamFacilityAddress])
+
+  async function loadTeamFacility() {
+    const supabase = createClient()
+    const { data: teamData } = await supabase
+      .from('teams')
+      .select('facility_id, facility_name')
+      .eq('id', teamId)
+      .single()
+
+    if (teamData) {
+      if (teamData.facility_id) {
+        // Load venue details if facility_id is set
+        const { data: venueData } = await supabase
+          .from('venues')
+          .select('name, address')
+          .eq('id', teamData.facility_id)
+          .single()
+
+        if (venueData) {
+          setTeamFacilityName(venueData.name)
+          setTeamFacilityAddress(venueData.address || null)
+        }
+      } else if (teamData.facility_name) {
+        // Use facility_name directly
+        setTeamFacilityName(teamData.facility_name)
+        setTeamFacilityAddress(null)
+      } else {
+        setTeamFacilityName(null)
+        setTeamFacilityAddress(null)
+      }
+    }
+  }
 
   function resetForm() {
     setDate('')

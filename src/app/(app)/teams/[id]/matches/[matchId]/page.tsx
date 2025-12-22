@@ -80,6 +80,8 @@ export default function MatchDetailPage() {
   const [warmupStatus, setWarmupStatus] = useState<'booked' | 'none_yet' | 'no_warmup'>('none_yet')
   const [warmupTime, setWarmupTime] = useState('')
   const [warmupCourt, setWarmupCourt] = useState('')
+  const [teamFacilityName, setTeamFacilityName] = useState<string | null>(null)
+  const [teamFacilityAddress, setTeamFacilityAddress] = useState<string | null>(null)
   const [checklist, setChecklist] = useState<ChecklistItem[]>([
     { days: 14, task: 'Order balls', completed: false },
     { days: 10, task: 'Email opponent captain', completed: false },
@@ -139,6 +141,25 @@ export default function MatchDetailPage() {
 
     if (teamData) {
       setTeam(teamData)
+      
+      // Load team facility
+      if (teamData.facility_id) {
+        // Load venue details if facility_id is set
+        const { data: venueData } = await supabase
+          .from('venues')
+          .select('name, address')
+          .eq('id', teamData.facility_id)
+          .single()
+
+        if (venueData) {
+          setTeamFacilityName(venueData.name)
+          setTeamFacilityAddress(venueData.address || null)
+        }
+      } else if (teamData.facility_name) {
+        // Use facility_name directly
+        setTeamFacilityName(teamData.facility_name)
+        setTeamFacilityAddress(null)
+      }
       
       // Check if current user is captain or co-captain
       if (user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
@@ -288,13 +309,22 @@ Thank you`)
 
   function handleStartEdit() {
     if (match) {
+      // Default venue to team facility if home match and venue is empty
+      let venue = match.venue
+      let venueAddress = match.venue_address
+      
+      if (match.is_home && !venue && teamFacilityName) {
+        venue = teamFacilityName
+        venueAddress = teamFacilityAddress || null
+      }
+      
       setEditedMatch({
         opponent_name: match.opponent_name,
         date: match.date,
         time: match.time,
         duration: (match as any).duration || null,
-        venue: match.venue,
-        venue_address: match.venue_address,
+        venue: venue,
+        venue_address: venueAddress,
         opponent_captain_name: match.opponent_captain_name,
         opponent_captain_email: match.opponent_captain_email,
         is_home: match.is_home,
@@ -302,6 +332,24 @@ Thank you`)
       setIsEditing(true)
     }
   }
+
+  // Update venue when is_home changes to true
+  useEffect(() => {
+    if (isEditing && editedMatch.is_home && !editedMatch.venue && teamFacilityName) {
+      setEditedMatch(prev => ({
+        ...prev,
+        venue: teamFacilityName,
+        venue_address: teamFacilityAddress || null,
+      }))
+    } else if (isEditing && !editedMatch.is_home && editedMatch.venue === teamFacilityName) {
+      // Clear venue when switching to away match if it was the team facility
+      setEditedMatch(prev => ({
+        ...prev,
+        venue: '',
+        venue_address: null,
+      }))
+    }
+  }, [editedMatch.is_home, isEditing, teamFacilityName, teamFacilityAddress])
 
   function handleCancelEdit() {
     // Reset form to original values
