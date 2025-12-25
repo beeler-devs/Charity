@@ -24,10 +24,12 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2, Plus } from 'lucide-react'
-import { addDays, addWeeks, format, parseISO } from 'date-fns'
+import { format } from 'date-fns'
 import { getEventTypes } from '@/lib/event-type-colors'
 import { EventType } from '@/lib/calendar-utils'
-import { VenueDialog } from '@/components/teams/venue-dialog'
+import { RecurrenceSelector } from '@/components/shared/recurrence-selector'
+import { LocationSelector } from '@/components/shared/location-selector'
+import { generateRecurringDates, RecurrencePattern, RecurrenceEndType, CustomRecurrenceData } from '@/lib/recurrence-utils'
 
 interface AddEventDialogProps {
   open: boolean
@@ -53,15 +55,18 @@ export function AddEventDialog({
   const [description, setDescription] = useState('')
   const [eventType, setEventType] = useState<EventType>('other')
   const [isRecurring, setIsRecurring] = useState(false)
-  const [recurrencePattern, setRecurrencePattern] = useState<'daily' | 'weekly' | 'custom'>('weekly')
-  const [endType, setEndType] = useState<'date' | 'occurrences'>('date')
+  const [recurrencePattern, setRecurrencePattern] = useState<RecurrencePattern>('weekly')
+  const [endType, setEndType] = useState<RecurrenceEndType>('date')
   const [endDate, setEndDate] = useState('')
   const [occurrences, setOccurrences] = useState('')
+  const [customRecurrence, setCustomRecurrence] = useState<CustomRecurrenceData>({
+    interval: 1,
+    timeUnit: 'week',
+    selectedDays: [],
+  })
   const [loading, setLoading] = useState(false)
-  const [venues, setVenues] = useState<any[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState<string | undefined>(undefined)
   const [locationMode, setLocationMode] = useState<'venue' | 'custom'>('venue')
-  const [showVenueDialog, setShowVenueDialog] = useState(false)
   const [isCaptain, setIsCaptain] = useState(false)
   const { toast } = useToast()
 
@@ -76,7 +81,6 @@ export function AddEventDialog({
 
   useEffect(() => {
     if (open && selectedTeamId) {
-      loadVenues()
       checkCaptainStatus()
     }
   }, [open, selectedTeamId])
@@ -107,32 +111,6 @@ export function AddEventDialog({
     }
   }
 
-  async function loadVenues() {
-    const supabase = createClient()
-    
-    // Load system-wide active venues (available to all authenticated users)
-    const { data: systemVenues } = await supabase
-      .from('venues')
-      .select('*')
-      .is('team_id', null)
-      .eq('is_active', true)
-      .order('region', { ascending: true, nullsFirst: false })
-      .order('name', { ascending: true })
-
-    // Load team-specific venues (available to all team members)
-    const { data: teamVenues } = await supabase
-      .from('venues')
-      .select('*')
-      .eq('team_id', selectedTeamId)
-      .order('name', { ascending: true })
-
-    const allVenues = [
-      ...(systemVenues || []),
-      ...(teamVenues || [])
-    ]
-
-    setVenues(allVenues)
-  }
 
   function resetForm() {
     setEventName('')
@@ -147,45 +125,15 @@ export function AddEventDialog({
     setEndType('date')
     setEndDate('')
     setOccurrences('')
+    setCustomRecurrence({
+      interval: 1,
+      timeUnit: 'week',
+      selectedDays: [],
+    })
     setSelectedVenueId(undefined)
     setLocationMode('venue')
   }
 
-  function generateRecurringDates(startDate: string, pattern: 'daily' | 'weekly' | 'custom', endDateStr?: string, numOccurrences?: number): string[] {
-    const dates: string[] = [startDate]
-    // Parse the date string properly to avoid timezone issues
-    // parseISO handles 'yyyy-MM-dd' format correctly in local time
-    const start = parseISO(startDate)
-    let current = new Date(start)
-    let count = 1
-
-    if (endDateStr) {
-      const end = parseISO(endDateStr)
-      while (current < end) {
-        if (pattern === 'daily') {
-          current = addDays(current, 1)
-        } else if (pattern === 'weekly') {
-          current = addWeeks(current, 1)
-        }
-        // For custom, we'll handle separately if needed
-        if (current <= end) {
-          dates.push(format(current, 'yyyy-MM-dd'))
-        }
-      }
-    } else if (numOccurrences) {
-      while (count < numOccurrences) {
-        if (pattern === 'daily') {
-          current = addDays(current, 1)
-        } else if (pattern === 'weekly') {
-          current = addWeeks(current, 1)
-        }
-        dates.push(format(current, 'yyyy-MM-dd'))
-        count++
-      }
-    }
-
-    return dates
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -281,8 +229,10 @@ export function AddEventDialog({
         ? generateRecurringDates(
             date,
             recurrencePattern,
+            endType,
             endType === 'date' ? endDate : undefined,
-            endType === 'occurrences' ? parseInt(occurrences) : undefined
+            endType === 'occurrences' ? parseInt(occurrences) : undefined,
+            recurrencePattern === 'custom' ? customRecurrence : undefined
           )
         : [date]
 
@@ -311,8 +261,11 @@ export function AddEventDialog({
           baseEvent.recurrence_pattern = recurrencePattern
           if (endType === 'date') {
             baseEvent.recurrence_end_date = endDate
-          } else {
+          } else if (endType === 'occurrences') {
             baseEvent.recurrence_occurrences = parseInt(occurrences)
+          }
+          if (recurrencePattern === 'custom' && customRecurrence) {
+            baseEvent.recurrence_custom_data = customRecurrence
           }
         }
 
@@ -559,107 +512,21 @@ export function AddEventDialog({
           </div>
 
           {/* Location */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="location">Location</Label>
-              <div className="flex items-center gap-2">
-                <Select value={locationMode} onValueChange={(v) => {
-                  setLocationMode(v as 'venue' | 'custom')
-                  if (v === 'custom') {
-                    setSelectedVenueId(undefined)
-                    setLocation('')
-                  } else {
-                    setLocation('')
-                    setSelectedVenueId(undefined)
-                  }
-                }}>
-                  <SelectTrigger className="w-32">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="venue">Select Venue</SelectItem>
-                    <SelectItem value="custom">Custom Location</SelectItem>
-                  </SelectContent>
-                </Select>
-                {locationMode === 'venue' && isCaptain && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowVenueDialog(true)}
-                    title="Create a new team-specific venue"
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    New
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {locationMode === 'venue' ? (
-              <Select
-                value={selectedVenueId || undefined}
-                onValueChange={(venueId) => {
-                  setSelectedVenueId(venueId)
-                  const venue = venues.find(v => v.id === venueId)
-                  if (venue) {
-                    // Set location to venue name, optionally include address
-                    setLocation(venue.address ? `${venue.name} - ${venue.address}` : venue.name)
-                  }
-                }}
-              >
-                <SelectTrigger id="location">
-                  <SelectValue placeholder="Select a venue..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {venues.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground text-center">
-                      No venues available
-                    </div>
-                  ) : (
-                    <>
-                      {venues.filter(v => !v.team_id).length > 0 && (
-                        <>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                            System Venues
-                          </div>
-                          {venues
-                            .filter(v => !v.team_id)
-                            .map((venue) => (
-                              <SelectItem key={venue.id} value={venue.id}>
-                                {venue.name}
-                                {venue.region && ` (${venue.region})`}
-                              </SelectItem>
-                            ))}
-                        </>
-                      )}
-                      {venues.filter(v => v.team_id === selectedTeamId).length > 0 && (
-                        <>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                            Team Venues
-                          </div>
-                          {venues
-                            .filter(v => v.team_id === selectedTeamId)
-                            .map((venue) => (
-                              <SelectItem key={venue.id} value={venue.id}>
-                                {venue.name}
-                              </SelectItem>
-                            ))}
-                        </>
-                      )}
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            ) : (
-              <Input
-                id="location"
-                placeholder="Court name, restaurant, etc."
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-              />
-            )}
-          </div>
+          <LocationSelector
+            locationMode={locationMode}
+            onLocationModeChange={setLocationMode}
+            selectedVenueId={selectedVenueId}
+            onVenueChange={setSelectedVenueId}
+            customLocation={location}
+            onCustomLocationChange={setLocation}
+            teamId={selectedTeamId}
+            canCreateVenue={isCaptain}
+            onVenueSelected={(venue) => {
+              if (venue) {
+                setLocation(venue.address ? `${venue.name} - ${venue.address}` : venue.name)
+              }
+            }}
+          />
 
           {/* Description */}
           <div className="space-y-2">
@@ -686,84 +553,22 @@ export function AddEventDialog({
               </Label>
             </div>
 
-            {isRecurring && (
-              <div className="space-y-4 pl-6 border-l-2">
-                {/* Recurrence Pattern */}
-                <div className="space-y-2">
-                  <Label htmlFor="recurrencePattern">Recurrence Pattern</Label>
-                  <Select
-                    value={recurrencePattern}
-                    onValueChange={(value) => setRecurrencePattern(value as 'daily' | 'weekly' | 'custom')}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="daily">Daily</SelectItem>
-                      <SelectItem value="weekly">Weekly</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* End Type Selection */}
-                <div className="space-y-2">
-                  <Label>End Recurrence</Label>
-                  <Select value={endType} onValueChange={(value) => setEndType(value as 'date' | 'occurrences')}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="date">On a specific date</SelectItem>
-                      <SelectItem value="occurrences">After number of occurrences</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* End Date or Occurrences */}
-                {endType === 'date' ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="endDate">
-                      End Date <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="endDate"
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      min={date}
-                      required
-                    />
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <Label htmlFor="occurrences">
-                      Number of Occurrences <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                      id="occurrences"
-                      type="number"
-                      min="2"
-                      value={occurrences}
-                      onChange={(e) => setOccurrences(e.target.value)}
-                      placeholder="e.g., 10"
-                      required
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      The event will repeat {occurrences ? `${occurrences} times` : 'multiple times'} starting from {date}
-                    </p>
-                  </div>
-                )}
-
-                {recurrencePattern === 'custom' && (
-                  <div className="p-3 bg-muted rounded-md">
-                    <p className="text-sm text-muted-foreground">
-                      Custom recurrence patterns are coming soon. For now, please use Daily or Weekly.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
+            <RecurrenceSelector
+              isRecurring={isRecurring}
+              onRecurringChange={setIsRecurring}
+              pattern={recurrencePattern}
+              onPatternChange={setRecurrencePattern}
+              endType={endType}
+              onEndTypeChange={setEndType}
+              endDate={endDate}
+              onEndDateChange={setEndDate}
+              occurrences={occurrences}
+              onOccurrencesChange={setOccurrences}
+              customRecurrence={customRecurrence}
+              onCustomRecurrenceChange={setCustomRecurrence}
+              startDate={date}
+              showNeverOption={false}
+            />
           </div>
 
           <DialogFooter>
@@ -781,16 +586,6 @@ export function AddEventDialog({
           </DialogFooter>
         </form>
 
-        <VenueDialog
-          open={showVenueDialog}
-          onOpenChange={setShowVenueDialog}
-          venue={null}
-          teamId={selectedTeamId}
-          onSaved={() => {
-            loadVenues()
-            setShowVenueDialog(false)
-          }}
-        />
       </DialogContent>
     </Dialog>
   )

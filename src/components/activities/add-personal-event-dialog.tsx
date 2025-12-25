@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -23,14 +24,13 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2 } from 'lucide-react'
-import { getActivityTypes } from '@/lib/event-type-colors'
+import { getActivityTypeLabel } from '@/lib/event-type-colors'
 import { ActivityType } from '@/lib/calendar-utils'
-import { VenueDialog } from '@/components/teams/venue-dialog'
+import { getUserActivityTypes, DEFAULT_ACTIVITY_TYPES } from '@/lib/activity-type-utils'
 import { PersonalEvent } from '@/types/database.types'
-import { Checkbox } from '@/components/ui/checkbox'
-import { parseISO, format, addDays, addWeeks, addMonths, addYears, getDay, isBefore } from 'date-fns'
-import { Calendar } from 'lucide-react'
-import { CustomRecurrenceDialog } from './custom-recurrence-dialog'
+import { RecurrenceSelector } from '@/components/shared/recurrence-selector'
+import { LocationSelector } from '@/components/shared/location-selector'
+import { generateRecurringDates, RecurrencePattern, RecurrenceEndType, CustomRecurrenceData } from '@/lib/recurrence-utils'
 
 interface AddPersonalEventDialogProps {
   open: boolean
@@ -54,35 +54,40 @@ export function AddPersonalEventDialog({
   const [cost, setCost] = useState('')
   const [selectedTeamId, setSelectedTeamId] = useState<string>('')
   const [isRecurring, setIsRecurring] = useState(false)
-  const [recurrencePattern, setRecurrencePattern] = useState<'daily' | 'weekly' | 'custom'>('weekly')
-  const [endType, setEndType] = useState<'date' | 'occurrences' | 'never'>('date')
+  const [recurrencePattern, setRecurrencePattern] = useState<RecurrencePattern>('weekly')
+  const [endType, setEndType] = useState<RecurrenceEndType>('date')
   const [endDate, setEndDate] = useState('')
   const [occurrences, setOccurrences] = useState('')
-  const [customRecurrence, setCustomRecurrence] = useState<{
-    interval: number
-    timeUnit: 'day' | 'week' | 'month' | 'year'
-    selectedDays: number[]
-  }>({
+  const [customRecurrence, setCustomRecurrence] = useState<CustomRecurrenceData>({
     interval: 1,
     timeUnit: 'week',
     selectedDays: [],
   })
-  const [showCustomRecurrenceDialog, setShowCustomRecurrenceDialog] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [venues, setVenues] = useState<any[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState<string | undefined>(undefined)
-  const [locationMode, setLocationMode] = useState<'venue' | 'custom'>('custom')
-  const [showVenueDialog, setShowVenueDialog] = useState(false)
+  const [locationMode, setLocationMode] = useState<'venue' | 'custom'>('venue')
   const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([])
+  const [availableActivityTypes, setAvailableActivityTypes] = useState<Array<{ value: ActivityType; label: string }>>(DEFAULT_ACTIVITY_TYPES)
   const { toast } = useToast()
 
   useEffect(() => {
     if (open) {
       loadTeams()
-      loadVenues()
+      loadActivityTypes()
       resetForm()
     }
   }, [open])
+
+  async function loadActivityTypes() {
+    try {
+      const types = await getUserActivityTypes()
+      setAvailableActivityTypes(types)
+    } catch (error) {
+      console.error('Error loading activity types:', error)
+      // Fallback to defaults
+      setAvailableActivityTypes(DEFAULT_ACTIVITY_TYPES)
+    }
+  }
 
   async function loadTeams() {
     const supabase = createClient()
@@ -106,42 +111,6 @@ export function AddPersonalEventDialog({
     }
   }
 
-  async function loadVenues() {
-    const supabase = createClient()
-    
-    // Load system-wide active venues
-    const { data: systemVenues } = await supabase
-      .from('venues')
-      .select('*')
-      .is('team_id', null)
-      .eq('is_active', true)
-      .order('region', { ascending: true, nullsFirst: false })
-      .order('name', { ascending: true })
-
-    // Load team-specific venues if a team is selected
-    let teamVenues: any[] = []
-    if (selectedTeamId) {
-      const { data } = await supabase
-        .from('venues')
-        .select('*')
-        .eq('team_id', selectedTeamId)
-        .order('name', { ascending: true })
-      teamVenues = data || []
-    }
-
-    const allVenues = [
-      ...(systemVenues || []),
-      ...teamVenues
-    ]
-
-    setVenues(allVenues)
-  }
-
-  useEffect(() => {
-    if (selectedTeamId) {
-      loadVenues()
-    }
-  }, [selectedTeamId])
 
   function resetForm() {
     setTitle('')
@@ -155,7 +124,8 @@ export function AddPersonalEventDialog({
     setCost('')
     setSelectedTeamId('')
     setSelectedVenueId(undefined)
-    setLocationMode('custom')
+    setLocationMode('venue')
+    setSelectedVenueId(undefined)
     setIsRecurring(false)
     setRecurrencePattern('weekly')
     setEndType('date')
@@ -166,178 +136,8 @@ export function AddPersonalEventDialog({
       timeUnit: 'week',
       selectedDays: [],
     })
-    setShowCustomRecurrenceDialog(false)
   }
 
-  function generateRecurringDates(
-    startDate: string,
-    pattern: 'daily' | 'weekly' | 'custom',
-    endDateStr?: string,
-    numOccurrences?: number,
-    customData?: { interval: number; timeUnit: 'day' | 'week' | 'month' | 'year'; selectedDays?: number[] }
-  ): string[] {
-    const dates: string[] = [startDate]
-    const start = parseISO(startDate)
-    let current = new Date(start)
-    let count = 1
-    const maxIterations = 1000 // Safety limit to prevent infinite loops
-
-    if (pattern === 'custom' && customData) {
-      const { interval, timeUnit, selectedDays } = customData
-      
-      if (endDateStr) {
-        const end = parseISO(endDateStr)
-        let iterations = 0
-        
-        while (current < end && iterations < maxIterations) {
-          iterations++
-          
-          if (timeUnit === 'day') {
-            current = addDays(current, interval)
-          } else if (timeUnit === 'week') {
-            if (selectedDays && selectedDays.length > 0) {
-              // For weekly with selected days, find next occurrence of selected days
-              let found = false
-              let attempts = 0
-              
-              while (!found && attempts < 100) {
-                attempts++
-                let nextDate: Date | null = null
-                const currentDayOfWeek = getDay(current)
-                
-                // Find the next selected day from current date
-                for (const dayOfWeek of selectedDays) {
-                  let dayDiff = (dayOfWeek - currentDayOfWeek + 7) % 7
-                  // If it's the same day and this is the first attempt, skip to next week
-                  if (dayDiff === 0 && attempts === 1) {
-                    dayDiff = 7
-                  }
-                  const candidate = addDays(current, dayDiff || 7)
-                  
-                  if (candidate > current && candidate <= end) {
-                    if (!nextDate || candidate < nextDate) {
-                      nextDate = candidate
-                    }
-                  }
-                }
-                
-                if (nextDate) {
-                  current = nextDate
-                  dates.push(format(current, 'yyyy-MM-dd'))
-                  found = true
-                } else {
-                  // Move to next week interval (start of next interval week)
-                  current = addWeeks(current, interval)
-                  // Reset to start of that week (Sunday)
-                  const dayOfWeek = getDay(current)
-                  current = addDays(current, -dayOfWeek)
-                }
-              }
-            } else {
-              current = addWeeks(current, interval)
-            }
-          } else if (timeUnit === 'month') {
-            current = addMonths(current, interval)
-          } else if (timeUnit === 'year') {
-            current = addYears(current, interval)
-          }
-          
-          if (current <= end && (timeUnit !== 'week' || !selectedDays || selectedDays.length === 0)) {
-            dates.push(format(current, 'yyyy-MM-dd'))
-          }
-        }
-      } else if (numOccurrences) {
-        let iterations = 0
-        
-        while (count < numOccurrences && iterations < maxIterations) {
-          iterations++
-          
-          if (timeUnit === 'day') {
-            current = addDays(current, interval)
-          } else if (timeUnit === 'week') {
-            if (selectedDays && selectedDays.length > 0) {
-              // Find next occurrence of selected days
-              let found = false
-              let attempts = 0
-              
-              while (!found && attempts < 100) {
-                attempts++
-                let nextDate: Date | null = null
-                const currentDayOfWeek = getDay(current)
-                
-                // Find the next selected day from current date
-                for (const dayOfWeek of selectedDays) {
-                  let dayDiff = (dayOfWeek - currentDayOfWeek + 7) % 7
-                  // If it's the same day and this is the first attempt, skip to next week
-                  if (dayDiff === 0 && attempts === 1) {
-                    dayDiff = 7
-                  }
-                  const candidate = addDays(current, dayDiff || 7)
-                  
-                  if (candidate > current) {
-                    if (!nextDate || candidate < nextDate) {
-                      nextDate = candidate
-                    }
-                  }
-                }
-                
-                if (nextDate) {
-                  current = nextDate
-                  dates.push(format(current, 'yyyy-MM-dd'))
-                  count++
-                  found = true
-                } else {
-                  // Move to next week interval (start of next interval week)
-                  current = addWeeks(current, interval)
-                  // Reset to start of that week (Sunday)
-                  const dayOfWeek = getDay(current)
-                  current = addDays(current, -dayOfWeek)
-                }
-              }
-            } else {
-              current = addWeeks(current, interval)
-            }
-          } else if (timeUnit === 'month') {
-            current = addMonths(current, interval)
-          } else if (timeUnit === 'year') {
-            current = addYears(current, interval)
-          }
-          
-          if (timeUnit !== 'week' || !selectedDays || selectedDays.length === 0) {
-            dates.push(format(current, 'yyyy-MM-dd'))
-            count++
-          }
-        }
-      }
-    } else {
-      // Original logic for daily/weekly
-      if (endDateStr) {
-        const end = parseISO(endDateStr)
-        while (current < end) {
-          if (pattern === 'daily') {
-            current = addDays(current, 1)
-          } else if (pattern === 'weekly') {
-            current = addWeeks(current, 1)
-          }
-          if (current <= end) {
-            dates.push(format(current, 'yyyy-MM-dd'))
-          }
-        }
-      } else if (numOccurrences) {
-        while (count < numOccurrences) {
-          if (pattern === 'daily') {
-            current = addDays(current, 1)
-          } else if (pattern === 'weekly') {
-            current = addWeeks(current, 1)
-          }
-          dates.push(format(current, 'yyyy-MM-dd'))
-          count++
-        }
-      }
-    }
-
-    return dates
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -405,26 +205,17 @@ export function AddPersonalEventDialog({
       }
     }
 
-    // Determine location
-    let finalLocation = location
-    if (locationMode === 'venue' && selectedVenueId) {
-      const selectedVenue = venues.find(v => v.id === selectedVenueId)
-      if (selectedVenue) {
-        finalLocation = selectedVenue.name
-        if (selectedVenue.address) {
-          finalLocation += ` - ${selectedVenue.address}`
-        }
-      }
-    }
+    // Determine location - LocationSelector already sets the location text when a venue is selected
+    const finalLocation = location
 
     // Generate dates for recurring activities
-    // For "never" end type, we'll generate a large number of occurrences (1000) as a practical limit
     const dates = isRecurring
       ? generateRecurringDates(
           date,
           recurrencePattern,
+          endType,
           endType === 'date' ? endDate : undefined,
-          endType === 'occurrences' ? parseInt(occurrences) : endType === 'never' ? 1000 : undefined,
+          endType === 'occurrences' ? parseInt(occurrences) : undefined,
           recurrencePattern === 'custom' ? customRecurrence : undefined
         )
       : [date]
@@ -539,7 +330,7 @@ export function AddPersonalEventDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {getActivityTypes().map((type) => (
+                    {availableActivityTypes.map((type) => (
                       <SelectItem key={type.value} value={type.value}>
                         {type.label}
                       </SelectItem>
@@ -629,68 +420,21 @@ export function AddPersonalEventDialog({
               </div>
 
               {/* Location */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="location">Location</Label>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant={locationMode === 'venue' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setLocationMode('venue')}
-                    >
-                      Venue
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={locationMode === 'custom' ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setLocationMode('custom')}
-                    >
-                      Custom
-                    </Button>
-                  </div>
-                </div>
-
-                {locationMode === 'venue' ? (
-                  <div className="space-y-2">
-                    <Select
-                      value={selectedVenueId || undefined}
-                      onValueChange={setSelectedVenueId}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a venue" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {venues.length === 0 ? (
-                          <div className="px-2 py-1.5 text-sm text-muted-foreground">No venues available</div>
-                        ) : (
-                          venues.map((venue) => (
-                            <SelectItem key={venue.id} value={venue.id}>
-                              {venue.name} {venue.region ? `(${venue.region})` : ''}
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setShowVenueDialog(true)}
-                    >
-                      Add New Venue
-                    </Button>
-                  </div>
-                ) : (
-                  <Input
-                    id="location"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="Enter location"
-                  />
-                )}
-              </div>
+              <LocationSelector
+                locationMode={locationMode}
+                onLocationModeChange={setLocationMode}
+                selectedVenueId={selectedVenueId}
+                onVenueChange={setSelectedVenueId}
+                customLocation={location}
+                onCustomLocationChange={setLocation}
+                teamId={selectedTeamId || null}
+                canCreateVenue={false}
+                onVenueSelected={(venue) => {
+                  if (venue) {
+                    setLocation(venue.address ? `${venue.name} - ${venue.address}` : venue.name)
+                  }
+                }}
+              />
 
               {/* Max Attendees and Cost */}
               <div className="grid grid-cols-2 gap-4">
@@ -733,124 +477,22 @@ export function AddPersonalEventDialog({
 
               {/* Recurring Activity Options */}
               <div className="space-y-4 pt-4 border-t">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="isRecurring"
-                    checked={isRecurring}
-                    onCheckedChange={(checked) => setIsRecurring(checked === true)}
-                  />
-                  <Label htmlFor="isRecurring" className="font-normal cursor-pointer">
-                    This is a recurring activity
-                  </Label>
-                </div>
-
-                {isRecurring && (
-                  <div className="space-y-4 pl-6 border-l-2">
-                    {/* Recurrence Pattern */}
-                    <div className="space-y-2">
-                      <Label htmlFor="recurrencePattern">Recurrence Pattern</Label>
-                      <Select
-                        value={recurrencePattern}
-                        onValueChange={(value) => setRecurrencePattern(value as 'daily' | 'weekly' | 'custom')}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="daily">Daily</SelectItem>
-                          <SelectItem value="weekly">Weekly</SelectItem>
-                          <SelectItem value="custom">Custom</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* End Type Selection */}
-                    <div className="space-y-2">
-                      <Label>End Recurrence</Label>
-                      <Select value={endType} onValueChange={(value) => setEndType(value as 'date' | 'occurrences')}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="date">On a specific date</SelectItem>
-                          <SelectItem value="occurrences">After number of occurrences</SelectItem>
-                          <SelectItem value="never">Never</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* End Date or Occurrences */}
-                    {endType === 'date' ? (
-                      <div className="space-y-2">
-                        <Label htmlFor="endDate">
-                          End Date <span className="text-destructive">*</span>
-                        </Label>
-                        <Input
-                          id="endDate"
-                          type="date"
-                          value={endDate}
-                          onChange={(e) => setEndDate(e.target.value)}
-                          min={date}
-                          required
-                        />
-                      </div>
-                    ) : endType === 'occurrences' ? (
-                      <div className="space-y-2">
-                        <Label htmlFor="occurrences">
-                          Number of Occurrences <span className="text-destructive">*</span>
-                        </Label>
-                        <Input
-                          id="occurrences"
-                          type="number"
-                          min="2"
-                          value={occurrences}
-                          onChange={(e) => setOccurrences(e.target.value)}
-                          placeholder="e.g., 10"
-                          required
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          The activity will repeat {occurrences ? `${occurrences} times` : 'multiple times'} starting from {date}
-                        </p>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        The activity will repeat indefinitely
-                      </p>
-                    )}
-
-                    {recurrencePattern === 'custom' && (
-                      <div className="space-y-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setShowCustomRecurrenceDialog(true)}
-                          className="w-full"
-                        >
-                          Configure Custom Recurrence
-                        </Button>
-                        {customRecurrence && (
-                          <div className="text-xs text-muted-foreground space-y-1">
-                            <p>
-                              Every {customRecurrence.interval} {customRecurrence.timeUnit}{customRecurrence.interval > 1 ? 's' : ''}
-                              {customRecurrence.timeUnit === 'week' && customRecurrence.selectedDays && customRecurrence.selectedDays.length > 0 && (
-                                <> on {customRecurrence.selectedDays.map(d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]).join(', ')}</>
-                              )}
-                            </p>
-                            {endType === 'date' && endDate && (
-                              <p>Until {format(new Date(endDate), 'MMM d, yyyy')}</p>
-                            )}
-                            {endType === 'occurrences' && occurrences && (
-                              <p>After {occurrences} occurrences</p>
-                            )}
-                            {endType === 'never' && (
-                              <p>No end date</p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <RecurrenceSelector
+                  isRecurring={isRecurring}
+                  onRecurringChange={setIsRecurring}
+                  pattern={recurrencePattern}
+                  onPatternChange={setRecurrencePattern}
+                  endType={endType}
+                  onEndTypeChange={setEndType}
+                  endDate={endDate}
+                  onEndDateChange={setEndDate}
+                  occurrences={occurrences}
+                  onOccurrencesChange={setOccurrences}
+                  customRecurrence={customRecurrence}
+                  onCustomRecurrenceChange={setCustomRecurrence}
+                  startDate={date}
+                  showNeverOption={true}
+                />
               </div>
             </div>
 
@@ -880,43 +522,9 @@ export function AddPersonalEventDialog({
           </form>
         </DialogContent>
       </Dialog>
-
-      <VenueDialog
-        open={showVenueDialog}
-        onOpenChange={setShowVenueDialog}
-        venue={null}
-        teamId={selectedTeamId || undefined}
-        onSaved={() => {
-          setShowVenueDialog(false)
-          loadVenues()
-        }}
-      />
-
-      <CustomRecurrenceDialog
-        open={showCustomRecurrenceDialog}
-        onOpenChange={setShowCustomRecurrenceDialog}
-        startDate={date}
-        recurrence={customRecurrence}
-        endType={endType}
-        endDate={endDate}
-        occurrences={occurrences}
-        onSave={(recurrence, newEndType, newEndDate, newOccurrences) => {
-          setCustomRecurrence(recurrence)
-          setEndType(newEndType)
-          setEndDate(newEndDate)
-          setOccurrences(newOccurrences)
-        }}
-        onDiscard={() => {
-          // Reset to defaults
-          setCustomRecurrence({
-            interval: 1,
-            timeUnit: 'week',
-            selectedDays: [],
-          })
-        }}
-      />
     </>
   )
 }
+
 
 

@@ -66,6 +66,7 @@ interface Venue {
   region?: string | null
   is_active?: boolean
   team_id?: string | null
+  default_court_time?: number | null
 }
 
 export function CreateTeamDialog({ open, onOpenChange, onCreated }: CreateTeamDialogProps) {

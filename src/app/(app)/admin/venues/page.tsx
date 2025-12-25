@@ -28,6 +28,7 @@ interface Venue {
   region: string | null
   is_active: boolean
   team_id: string | null
+  default_court_time: number | null
 }
 
 export default function AdminVenuesPage() {
@@ -216,6 +217,11 @@ export default function AdminVenuesPage() {
                       <div className="flex items-center gap-2">
                         <MapPin className="h-4 w-4 text-muted-foreground" />
                         <h4 className="font-medium">{venue.name}</h4>
+                        {venue.default_court_time && (
+                          <span className="text-xs text-muted-foreground">
+                            ({venue.default_court_time} min)
+                          </span>
+                        )}
                         {venue.region && (
                           <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
                             {venue.region}

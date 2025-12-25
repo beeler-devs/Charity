@@ -32,6 +32,8 @@ import { CalendarItemTile } from '@/components/calendar/calendar-item-tile'
 import { AddEventDialog } from '@/components/teams/add-event-dialog'
 import { useToast } from '@/hooks/use-toast'
 import { startOfWeek, addDays } from 'date-fns'
+import { getTeamColor } from '@/lib/team-colors'
+import { cn } from '@/lib/utils'
 
 type ViewMode = 'week' | 'month' | 'list'
 
@@ -927,12 +929,23 @@ export default function CalendarPage() {
                 <span className="text-xs font-medium text-muted-foreground mr-1">Teams:</span>
                 {teams.map((team) => {
                   const isSelected = selectedTeamIds.includes(team.id)
+                  const teamColor = getTeamColor(team.id, team.color)
                   return (
                     <Button
                       key={team.id}
                       variant={isSelected ? "default" : "outline"}
                       size="sm"
-                      className="h-7 text-xs"
+                      className={cn(
+                        "h-7 text-xs",
+                        isSelected && "text-white",
+                        !isSelected && teamColor.textClass
+                      )}
+                      style={isSelected ? {
+                        backgroundColor: teamColor.hex,
+                        borderColor: teamColor.hex,
+                      } : {
+                        borderColor: teamColor.hex,
+                      }}
                       onClick={() => {
                         if (isSelected) {
                           // If clicking a selected team, deselect it (but keep at least one selected)
@@ -987,12 +1000,31 @@ export default function CalendarPage() {
               <span className="text-xs font-medium text-muted-foreground mr-1">Event Types:</span>
               {['match', 'practice', 'warmup', 'other'].map((eventType) => {
                 const isSelected = selectedEventTypes.includes(eventType)
+                // Get color for event type
+                let eventColor = 'rgb(168, 85, 247)' // default purple
+                if (eventType === 'practice') {
+                  eventColor = 'rgb(37, 99, 235)' // blue-600
+                } else if (eventType === 'warmup') {
+                  eventColor = 'rgb(249, 115, 22)' // orange-500
+                } else if (eventType === 'match') {
+                  eventColor = 'rgb(34, 197, 94)' // green-500 (matches are typically green)
+                }
                 return (
                   <Button
                     key={eventType}
                     variant={isSelected ? "default" : "outline"}
                     size="sm"
-                    className="h-7 text-xs"
+                    className={cn(
+                      "h-7 text-xs",
+                      isSelected && "text-white"
+                    )}
+                    style={isSelected ? {
+                      backgroundColor: eventColor,
+                      borderColor: eventColor,
+                    } : {
+                      borderColor: eventColor,
+                      color: eventColor,
+                    }}
                     onClick={() => {
                       if (isSelected) {
                         setSelectedEventTypes(selectedEventTypes.filter(t => t !== eventType))

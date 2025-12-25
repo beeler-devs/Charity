@@ -31,6 +31,7 @@ interface Venue {
   region?: string | null
   is_active?: boolean
   team_id?: string | null
+  default_court_time?: number | null
 }
 
 interface VenueDialogProps {
@@ -53,6 +54,7 @@ export function VenueDialog({
   const [googleMapsLink, setGoogleMapsLink] = useState('')
   const [region, setRegion] = useState('')
   const [isActive, setIsActive] = useState(true)
+  const [defaultCourtTime, setDefaultCourtTime] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
   
@@ -68,12 +70,14 @@ export function VenueDialog({
         setGoogleMapsLink(venue.google_maps_link || '')
         setRegion(venue.region || '')
         setIsActive(venue.is_active !== false) // Default to true if not set
+        setDefaultCourtTime(venue.default_court_time?.toString() || '')
       } else {
         setName('')
         setAddress('')
         setGoogleMapsLink('')
         setRegion('')
         setIsActive(true)
+        setDefaultCourtTime('')
       }
     }
   }, [open, venue])
@@ -101,6 +105,7 @@ export function VenueDialog({
           name: name.trim(),
           address: address.trim() || null,
           google_maps_link: googleMapsLink.trim() || null,
+          default_court_time: defaultCourtTime ? parseInt(defaultCourtTime, 10) : null,
         }
         
         // Only include system-level fields if this is a system-level venue
@@ -136,6 +141,7 @@ export function VenueDialog({
           address: address.trim() || null,
           google_maps_link: googleMapsLink.trim() || null,
           created_by: user?.id || null,
+          default_court_time: defaultCourtTime ? parseInt(defaultCourtTime, 10) : null,
         }
         
         // Only set team_id if provided (for team-specific venues)
@@ -224,6 +230,23 @@ export function VenueDialog({
             />
             <p className="text-xs text-muted-foreground">
               Paste the full Google Maps URL for this location
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="defaultCourtTime">Default Court Time (minutes)</Label>
+            <Input
+              id="defaultCourtTime"
+              type="number"
+              min="15"
+              max="180"
+              step="15"
+              placeholder="e.g., 60, 75, 90"
+              value={defaultCourtTime}
+              onChange={(e) => setDefaultCourtTime(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Default court time in minutes (typically 60, 75, or 90 minutes)
             </p>
           </div>
 

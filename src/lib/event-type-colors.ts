@@ -37,6 +37,8 @@ export function getActivityTypeBadgeClass(activityType?: ActivityType): string {
       return '!bg-teal-600 !text-white'
     case 'flex_league':
       return '!bg-amber-600 !text-white'
+    case 'booked_court':
+      return '!bg-violet-600 !text-white'
     case 'other':
       return '!bg-gray-600 !text-white'
     default:
@@ -75,6 +77,8 @@ export function getActivityTypeLabel(activityType?: ActivityType): string {
       return 'Class'
     case 'flex_league':
       return 'Flex League'
+    case 'booked_court':
+      return 'Booked Court'
     case 'other':
       return 'Other'
     default:
@@ -103,6 +107,7 @@ export function getActivityTypes(): { value: ActivityType; label: string }[] {
     { value: 'lesson', label: 'Lesson' },
     { value: 'class', label: 'Class' },
     { value: 'flex_league', label: 'Flex League' },
+    { value: 'booked_court', label: 'Booked Court' },
     { value: 'other', label: 'Other' },
   ]
 }

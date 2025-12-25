@@ -10,7 +10,7 @@ export interface CalendarDay {
 }
 
 export type EventType = 'practice' | 'warmup' | 'fun' | 'social' | 'other'
-export type ActivityType = 'scrimmage' | 'lesson' | 'class' | 'flex_league' | 'other'
+export type ActivityType = 'scrimmage' | 'lesson' | 'class' | 'flex_league' | 'booked_court' | 'other'
 
 export interface CalendarItem {
   id: string

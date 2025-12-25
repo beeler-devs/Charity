@@ -70,7 +70,7 @@ export interface PersonalEvent {
   id: string
   creator_id: string
   team_id?: string | null
-  activity_type: 'scrimmage' | 'lesson' | 'class' | 'flex_league' | 'other'
+  activity_type: 'scrimmage' | 'lesson' | 'class' | 'flex_league' | 'booked_court' | 'other'
   title: string
   date: string
   time: string

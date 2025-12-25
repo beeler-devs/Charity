@@ -24,7 +24,7 @@ export function ActivityTypeBadge({
   // Normalize activityType - handle null/undefined consistently
   const activityTypeStr = String(activityType || 'other').toLowerCase()
   const normalizedType = (activityTypeStr === 'scrimmage' || activityTypeStr === 'lesson' || 
-    activityTypeStr === 'class' || activityTypeStr === 'flex_league' || activityTypeStr === 'other'
+    activityTypeStr === 'class' || activityTypeStr === 'flex_league' || activityTypeStr === 'booked_court' || activityTypeStr === 'other'
     ? activityTypeStr 
     : 'other') as ActivityType
   
@@ -42,6 +42,8 @@ export function ActivityTypeBadge({
         return 'rgb(13, 148, 136)' // teal-600
       case 'flex_league':
         return 'rgb(217, 119, 6)' // amber-600
+      case 'booked_court':
+        return 'rgb(124, 58, 237)' // violet-600
       case 'other':
       default:
         return 'rgb(75, 85, 99)' // gray-600

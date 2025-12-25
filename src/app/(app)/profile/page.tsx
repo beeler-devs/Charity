@@ -23,7 +23,8 @@ import {
   Loader2,
   ChevronRight,
   Clock,
-  ArrowLeft
+  ArrowLeft,
+  Zap
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -366,6 +367,26 @@ export default function ProfilePage() {
                     <p className="font-medium text-sm">Default Availability</p>
                     <p className="text-xs text-muted-foreground">
                       Set your weekly time availability
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight className="h-5 w-5 text-muted-foreground" />
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+
+        {/* Activity Types Configuration */}
+        <Link href="/settings/activity-types">
+          <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Zap className="h-5 w-5 text-primary" />
+                  <div>
+                    <p className="font-medium text-sm">Activity Types</p>
+                    <p className="text-xs text-muted-foreground">
+                      Configure personal activity types
                     </p>
                   </div>
                 </div>

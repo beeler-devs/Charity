@@ -51,6 +51,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
+import { RecurrenceSelector } from '@/components/shared/recurrence-selector'
 
 type AvailabilityStatus = 'available' | 'unavailable' | 'maybe' | 'late'
 
@@ -74,6 +75,9 @@ export default function PersonalEventDetailPage() {
   const [removingInvitationId, setRemovingInvitationId] = useState<string | null>(null)
   const [isRecurring, setIsRecurring] = useState(false)
   const [initialEditScope, setInitialEditScope] = useState<'series' | 'single'>('single')
+  const [deleteScope, setDeleteScope] = useState<'single' | 'future' | 'series'>('single')
+  const [seriesEvents, setSeriesEvents] = useState<PersonalEvent[]>([])
+  const [deleting, setDeleting] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -115,6 +119,19 @@ export default function PersonalEventDetailPage() {
       const hasRecurrence = !!eventData.recurrence_series_id
       setIsRecurring(hasRecurrence)
       
+      // If recurring, load all events in the series
+      if (hasRecurrence && eventData.recurrence_series_id) {
+        const { data: seriesData } = await supabase
+          .from('personal_events')
+          .select('*')
+          .eq('recurrence_series_id', eventData.recurrence_series_id)
+          .order('date', { ascending: true })
+        
+        if (seriesData) {
+          setSeriesEvents(seriesData)
+        }
+      }
+      
       setEditedEvent({
         title: eventData.title,
         date: eventData.date,
@@ -125,6 +142,10 @@ export default function PersonalEventDetailPage() {
         activity_type: eventData.activity_type,
         max_attendees: eventData.max_attendees || null,
         cost: eventData.cost || null,
+        recurrence_pattern: eventData.recurrence_pattern || null,
+        recurrence_end_date: eventData.recurrence_end_date || null,
+        recurrence_occurrences: eventData.recurrence_occurrences || null,
+        recurrence_custom_data: eventData.recurrence_custom_data || null,
       })
 
       // Load attendees
@@ -244,20 +265,37 @@ export default function PersonalEventDetailPage() {
         return
       }
 
+      // Build update object
+      const updateData: any = {
+        title: editedEvent.title,
+        time: editedEvent.time,
+        duration: editedEvent.duration,
+        location: editedEvent.location,
+        description: editedEvent.description,
+        activity_type: editedEvent.activity_type,
+        max_attendees: editedEvent.max_attendees,
+        cost: editedEvent.cost,
+        updated_at: new Date().toISOString(),
+      }
+
+      // If recurrence pattern changed, update recurrence fields
+      if (editedEvent.recurrence_pattern !== undefined) {
+        updateData.recurrence_pattern = editedEvent.recurrence_pattern
+      }
+      if (editedEvent.recurrence_end_date !== undefined) {
+        updateData.recurrence_end_date = editedEvent.recurrence_end_date
+      }
+      if (editedEvent.recurrence_occurrences !== undefined) {
+        updateData.recurrence_occurrences = editedEvent.recurrence_occurrences
+      }
+      if (editedEvent.recurrence_custom_data) {
+        updateData.recurrence_custom_data = editedEvent.recurrence_custom_data
+      }
+
       // Update all events in the series
       const { error } = await supabase
         .from('personal_events')
-        .update({
-          title: editedEvent.title,
-          time: editedEvent.time,
-          duration: editedEvent.duration,
-          location: editedEvent.location,
-          description: editedEvent.description,
-          activity_type: editedEvent.activity_type,
-          max_attendees: editedEvent.max_attendees,
-          cost: editedEvent.cost,
-          updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('recurrence_series_id', seriesId)
 
       if (error) {
@@ -309,27 +347,88 @@ export default function PersonalEventDetailPage() {
   async function handleDelete() {
     if (!event) return
 
+    setDeleting(true)
     const supabase = createClient()
-    const { error } = await supabase
-      .from('personal_events')
-      .delete()
-      .eq('id', eventId)
 
-    if (error) {
+    try {
+      if (isRecurring && event.recurrence_series_id) {
+        // Handle recurring event deletion based on scope
+        if (deleteScope === 'series') {
+          // Delete entire series
+          const { error } = await supabase
+            .from('personal_events')
+            .delete()
+            .eq('recurrence_series_id', event.recurrence_series_id)
+
+          if (error) {
+            throw error
+          }
+
+          toast({
+            title: 'Series deleted',
+            description: 'All events in the series have been deleted',
+          })
+        } else if (deleteScope === 'future') {
+          // Delete this event and all future events in the series
+          const currentDate = new Date(event.date)
+          const { error } = await supabase
+            .from('personal_events')
+            .delete()
+            .eq('recurrence_series_id', event.recurrence_series_id)
+            .gte('date', event.date)
+
+          if (error) {
+            throw error
+          }
+
+          toast({
+            title: 'Events deleted',
+            description: 'This event and all future events in the series have been deleted',
+          })
+        } else {
+          // Delete only this occurrence
+          const { error } = await supabase
+            .from('personal_events')
+            .delete()
+            .eq('id', eventId)
+
+          if (error) {
+            throw error
+          }
+
+          toast({
+            title: 'Activity deleted',
+            description: 'This occurrence has been deleted',
+          })
+        }
+      } else {
+        // Non-recurring event - just delete it
+        const { error } = await supabase
+          .from('personal_events')
+          .delete()
+          .eq('id', eventId)
+
+        if (error) {
+          throw error
+        }
+
+        toast({
+          title: 'Activity deleted',
+          description: 'The activity has been deleted',
+        })
+      }
+
+      router.push('/activities')
+    } catch (error: any) {
       toast({
         title: 'Error',
-        description: error.message,
+        description: error.message || 'Failed to delete activity',
         variant: 'destructive',
       })
-      return
+    } finally {
+      setDeleting(false)
+      setShowDeleteAlert(false)
     }
-
-    toast({
-      title: 'Activity deleted',
-      description: 'The activity has been deleted',
-    })
-
-    router.push('/activities')
   }
 
   async function removeAttendee(attendeeId: string) {
@@ -719,7 +818,10 @@ export default function PersonalEventDetailPage() {
                   <Button
                     variant="destructive"
                     size="sm"
-                    onClick={() => setShowDeleteAlert(true)}
+                    onClick={() => {
+                      setDeleteScope('single') // Reset to safe default
+                      setShowDeleteAlert(true)
+                    }}
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
                     Delete
@@ -877,6 +979,69 @@ export default function PersonalEventDetailPage() {
                   />
                 </div>
               </div>
+
+              {/* Recurrence Pattern Editing - Only shown when editing series */}
+              {isRecurring && initialEditScope === 'series' && event && (
+                <div className="space-y-4 pt-4 border-t">
+                  <p className="text-sm font-medium text-muted-foreground">
+                    Note: Changing the recurrence pattern will update all future events in the series.
+                  </p>
+                  <RecurrenceSelector
+                    isRecurring={true}
+                    onRecurringChange={() => {}}
+                    pattern={(editedEvent.recurrence_pattern as any) || (event.recurrence_pattern as any) || 'weekly'}
+                    onPatternChange={(pattern) => {
+                      setEditedEvent({ ...editedEvent, recurrence_pattern: pattern as any })
+                    }}
+                    endType={
+                      editedEvent.recurrence_end_date 
+                        ? 'date' 
+                        : editedEvent.recurrence_occurrences 
+                        ? 'occurrences' 
+                        : event.recurrence_end_date 
+                        ? 'date' 
+                        : event.recurrence_occurrences 
+                        ? 'occurrences' 
+                        : 'never'
+                    }
+                    onEndTypeChange={(endType) => {
+                      if (endType === 'date') {
+                        setEditedEvent({ 
+                          ...editedEvent, 
+                          recurrence_end_date: editedEvent.recurrence_end_date || event.recurrence_end_date || '',
+                          recurrence_occurrences: null
+                        })
+                      } else if (endType === 'occurrences') {
+                        setEditedEvent({ 
+                          ...editedEvent, 
+                          recurrence_occurrences: editedEvent.recurrence_occurrences || event.recurrence_occurrences || null,
+                          recurrence_end_date: null
+                        })
+                      } else {
+                        setEditedEvent({ 
+                          ...editedEvent, 
+                          recurrence_end_date: null,
+                          recurrence_occurrences: null
+                        })
+                      }
+                    }}
+                    endDate={editedEvent.recurrence_end_date || event.recurrence_end_date || ''}
+                    onEndDateChange={(date) => {
+                      setEditedEvent({ ...editedEvent, recurrence_end_date: date || null })
+                    }}
+                    occurrences={(editedEvent.recurrence_occurrences || event.recurrence_occurrences)?.toString() || ''}
+                    onOccurrencesChange={(occurrences) => {
+                      setEditedEvent({ ...editedEvent, recurrence_occurrences: occurrences ? parseInt(occurrences) : null })
+                    }}
+                    customRecurrence={(editedEvent.recurrence_custom_data || event.recurrence_custom_data) || { interval: 1, timeUnit: 'week', selectedDays: [] }}
+                    onCustomRecurrenceChange={(data) => {
+                      setEditedEvent({ ...editedEvent, recurrence_custom_data: data })
+                    }}
+                    startDate={event.recurrence_original_date || event.date}
+                    showNeverOption={true}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -1190,18 +1355,88 @@ export default function PersonalEventDetailPage() {
       <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Activity?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isRecurring ? 'Delete Recurring Activity?' : 'Delete Activity?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{event.title}"? This action cannot be undone and will cancel all invitations.
+              {isRecurring ? (
+                <div className="space-y-4">
+                  <div>
+                    Are you sure you want to delete "{event.title}"? This action cannot be undone and will cancel all invitations.
+                  </div>
+                  <div className="space-y-3 pt-2">
+                    <label className="flex items-start space-x-3 cursor-pointer p-2 rounded-md hover:bg-muted/50 transition-colors">
+                      <input
+                        type="radio"
+                        name="deleteScope"
+                        value="single"
+                        checked={deleteScope === 'single'}
+                        onChange={(e) => setDeleteScope(e.target.value as 'single' | 'future' | 'series')}
+                        className="mt-1 w-4 h-4 text-primary"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">Delete only this occurrence</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          Only this event will be deleted. Other events in the series will remain.
+                        </div>
+                      </div>
+                    </label>
+                    <label className="flex items-start space-x-3 cursor-pointer p-2 rounded-md hover:bg-muted/50 transition-colors">
+                      <input
+                        type="radio"
+                        name="deleteScope"
+                        value="future"
+                        checked={deleteScope === 'future'}
+                        onChange={(e) => setDeleteScope(e.target.value as 'single' | 'future' | 'series')}
+                        className="mt-1 w-4 h-4 text-primary"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">Delete this and all future occurrences</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          This event and all events after it in the series will be deleted.
+                        </div>
+                      </div>
+                    </label>
+                    <label className="flex items-start space-x-3 cursor-pointer p-2 rounded-md hover:bg-muted/50 transition-colors">
+                      <input
+                        type="radio"
+                        name="deleteScope"
+                        value="series"
+                        checked={deleteScope === 'series'}
+                        onChange={(e) => setDeleteScope(e.target.value as 'single' | 'future' | 'series')}
+                        className="mt-1 w-4 h-4 text-primary"
+                      />
+                      <div className="flex-1">
+                        <div className="text-sm font-medium">Delete entire series</div>
+                        <div className="text-xs text-muted-foreground mt-0.5">
+                          All {seriesEvents.length} events in this series will be deleted.
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <span>
+                  Are you sure you want to delete "{event.title}"? This action cannot be undone and will cancel all invitations.
+                </span>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDelete}
+              disabled={deleting}
               className="bg-destructive hover:bg-destructive/90"
             >
-              Delete
+              {deleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete'
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
