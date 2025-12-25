@@ -7,19 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { createClient } from '@/lib/supabase/client'
 import { Contact } from '@/types/database.types'
-import { ContactListItem } from '@/components/contacts/contact-list-item'
 import { AddEditContactDialog } from '@/components/contacts/add-edit-contact-dialog'
+import { SelectContactsDialog } from '@/components/contacts/select-contacts-dialog'
 import { useToast } from '@/hooks/use-toast'
-import { Loader2, Plus, Users, Download, Search, X } from 'lucide-react'
+import { Loader2, Plus, Search, Users, RefreshCw, Trash2, Eye } from 'lucide-react'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -35,14 +28,16 @@ export default function ContactsPage() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterRelationship, setFilterRelationship] = useState<string>('all')
-  const [filterSource, setFilterSource] = useState<string>('all')
-  const [selectedTag, setSelectedTag] = useState<string>('all')
+  const [filterRelationship, setFilterRelationship] = useState('all')
+  const [filterSource, setFilterSource] = useState('all')
+  const [selectedTag, setSelectedTag] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [contactToDelete, setContactToDelete] = useState<Contact | null>(null)
   const [syncing, setSyncing] = useState(false)
+  const [showSelectContactsDialog, setShowSelectContactsDialog] = useState(false)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
   const router = useRouter()
   const { toast } = useToast()
 
@@ -104,25 +99,37 @@ export default function ContactsPage() {
         return
       }
 
-      const { data, error } = await supabase.rpc('sync_contacts_from_network', {
-        target_user_id: user.id,
-      })
+      // First, check if user is on any teams
+      const { data: userTeams, error: teamsError } = await supabase
+        .from('roster_members')
+        .select('team_id, teams(name)')
+        .eq('user_id', user.id)
+        .eq('is_active', true)
 
-      if (error) {
+      if (teamsError) {
+        console.error('Error checking user teams:', teamsError)
         toast({
           title: 'Error',
-          description: error.message,
+          description: 'Failed to check your team memberships',
           variant: 'destructive',
         })
-      } else {
-        const result = data?.[0]
-        toast({
-          title: 'Sync complete',
-          description: `Created: ${result?.created_count || 0}, Updated: ${result?.updated_count || 0}, Skipped: ${result?.skipped_count || 0}`,
-        })
-        loadContacts()
+        return
       }
+
+      if (!userTeams || userTeams.length === 0) {
+        toast({
+          title: 'No teams found',
+          description: 'You need to be on at least one team to sync contacts. Join a team first.',
+          variant: 'default',
+        })
+        return
+      }
+
+      // Open the selection dialog
+      setCurrentUserId(user.id)
+      setShowSelectContactsDialog(true)
     } catch (error: any) {
+      console.error('Sync exception:', error)
       toast({
         title: 'Error',
         description: error.message || 'Failed to sync contacts',
@@ -202,196 +209,216 @@ export default function ContactsPage() {
   const filteredContacts = useMemo(() => {
     return contacts.filter(contact => {
       // Search filter
-      const searchLower = searchTerm.toLowerCase()
-      const matchesSearch = !searchTerm ||
-        contact.name.toLowerCase().includes(searchLower) ||
-        contact.email?.toLowerCase().includes(searchLower) ||
-        contact.phone?.toLowerCase().includes(searchLower) ||
-        contact.address?.toLowerCase().includes(searchLower) ||
-        contact.notes?.toLowerCase().includes(searchLower) ||
-        contact.tags?.some(tag => tag.toLowerCase().includes(searchLower))
+      if (searchTerm) {
+        const search = searchTerm.toLowerCase()
+        const matchesName = contact.name?.toLowerCase().includes(search)
+        const matchesEmail = contact.email?.toLowerCase().includes(search)
+        const matchesPhone = contact.phone?.toLowerCase().includes(search)
+        if (!matchesName && !matchesEmail && !matchesPhone) {
+          return false
+        }
+      }
 
       // Relationship filter
-      const matchesRelationship = filterRelationship === 'all' ||
-        contact.relationship_type === filterRelationship ||
-        (!contact.relationship_type && filterRelationship === 'none')
+      if (filterRelationship !== 'all' && contact.relationship_type !== filterRelationship) {
+        return false
+      }
 
       // Source filter
-      const matchesSource = filterSource === 'all' ||
-        contact.source === filterSource
+      if (filterSource !== 'all' && contact.source !== filterSource) {
+        return false
+      }
 
       // Tag filter
-      const matchesTag = selectedTag === 'all' ||
-        contact.tags?.includes(selectedTag)
+      if (selectedTag !== 'all' && !contact.tags?.includes(selectedTag)) {
+        return false
+      }
 
-      return matchesSearch && matchesRelationship && matchesSource && matchesTag
+      return true
     })
   }, [contacts, searchTerm, filterRelationship, filterSource, selectedTag])
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
-  }
-
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="min-h-screen bg-background">
       <Header title="Contacts" />
-      
-      <main className="flex-1 p-4 space-y-4">
-        {/* Actions Bar */}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <div className="flex-1 relative">
+      <div className="container mx-auto px-4 py-6 pb-24">
+        {/* Actions */}
+        <div className="flex flex-col sm:flex-row gap-4 mb-6">
+          <Button
+            onClick={() => {
+              setEditingContact(null)
+              setDialogOpen(true)
+            }}
+            className="flex-1 sm:flex-none"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Add Contact
+          </Button>
+          <Button
+            onClick={handleSyncFromNetwork}
+            disabled={syncing}
+            variant="outline"
+            className="flex-1 sm:flex-none"
+          >
+            {syncing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Sync from Network
+          </Button>
+        </div>
+
+        {/* Search and Filters */}
+        <div className="space-y-4 mb-6">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search contacts..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9"
+              className="pl-10"
             />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2"
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <select
+              value={filterRelationship}
+              onChange={(e) => setFilterRelationship(e.target.value)}
+              className="px-3 py-2 border rounded-md text-sm"
+            >
+              <option value="all">All Relationships</option>
+              {relationshipTypes.map(type => (
+                <option key={type} value={type}>{type}</option>
+              ))}
+            </select>
+
+            <select
+              value={filterSource}
+              onChange={(e) => setFilterSource(e.target.value)}
+              className="px-3 py-2 border rounded-md text-sm"
+            >
+              <option value="all">All Sources</option>
+              <option value="manual">Manual</option>
+              <option value="auto">Auto</option>
+              <option value="merged">Merged</option>
+            </select>
+
+            {allTags.length > 0 && (
+              <select
+                value={selectedTag}
+                onChange={(e) => setSelectedTag(e.target.value)}
+                className="px-3 py-2 border rounded-md text-sm"
               >
-                <X className="h-4 w-4 text-muted-foreground" />
-              </button>
+                <option value="all">All Tags</option>
+                {allTags.map(tag => (
+                  <option key={tag} value={tag}>{tag}</option>
+                ))}
+              </select>
             )}
           </div>
-          <Button
-            variant="outline"
-            onClick={handleSyncFromNetwork}
-            disabled={syncing}
-          >
-            {syncing ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Download className="h-4 w-4 mr-2" />
-            )}
-            Sync from Network
-          </Button>
-          <Button onClick={() => {
-            setEditingContact(null)
-            setDialogOpen(true)
-          }}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Contact
-          </Button>
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-wrap gap-2">
-          <Select value={filterRelationship} onValueChange={setFilterRelationship}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Relationship" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Relationships</SelectItem>
-              <SelectItem value="none">No Relationship</SelectItem>
-              {relationshipTypes.map(type => (
-                <SelectItem key={type} value={type}>
-                  {type.replace('_', ' ')}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={filterSource} onValueChange={setFilterSource}>
-            <SelectTrigger className="w-[150px]">
-              <SelectValue placeholder="Source" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Sources</SelectItem>
-              <SelectItem value="manual">Manual</SelectItem>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="merged">Merged</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {allTags.length > 0 && (
-            <Select value={selectedTag} onValueChange={setSelectedTag}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Tag" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Tags</SelectItem>
-                {allTags.map(tag => (
-                  <SelectItem key={tag} value={tag}>
-                    {tag}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {(filterRelationship !== 'all' || filterSource !== 'all' || selectedTag !== 'all' || searchTerm) && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setFilterRelationship('all')
-                setFilterSource('all')
-                setSelectedTag('all')
-                setSearchTerm('')
-              }}
-            >
-              <X className="h-4 w-4 mr-2" />
-              Clear Filters
-            </Button>
-          )}
         </div>
 
         {/* Contacts List */}
-        {filteredContacts.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : filteredContacts.length === 0 ? (
           <Card>
-            <CardContent className="py-12 text-center">
-              <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-              <h3 className="font-semibold mb-2">
-                {contacts.length === 0 ? 'No contacts yet' : 'No contacts match your filters'}
-              </h3>
+            <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+              <Users className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No contacts found</h3>
               <p className="text-sm text-muted-foreground mb-4">
                 {contacts.length === 0
-                  ? 'Start building your tennis network by adding contacts or syncing from your teams'
-                  : 'Try adjusting your search or filters'}
+                  ? 'Get started by adding a contact or syncing from your network.'
+                  : 'Try adjusting your search or filters.'}
               </p>
-              {contacts.length === 0 && (
-                <Button onClick={() => {
+              <Button
+                onClick={() => {
                   setEditingContact(null)
                   setDialogOpen(true)
-                }}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Your First Contact
-                </Button>
-              )}
+                }}
+                variant="outline"
+              >
+                <Plus className="mr-2 h-4 w-4" />
+                Add Contact
+              </Button>
             </CardContent>
           </Card>
         ) : (
-          <div className="space-y-1">
-            {filteredContacts.map(contact => (
-              <ContactListItem
+          <div className="space-y-2">
+            {filteredContacts.map((contact) => (
+              <Card
                 key={contact.id}
-                contact={contact}
-                onDelete={(id) => {
-                  const contactToDelete = contacts.find(c => c.id === id)
-                  if (contactToDelete) {
-                    setContactToDelete(contactToDelete)
-                    setDeleteDialogOpen(true)
-                  }
+                className="cursor-pointer hover:bg-muted/50 transition-colors"
+                onClick={() => {
+                  setEditingContact(contact)
+                  setDialogOpen(true)
                 }}
-              />
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h3 className="font-semibold truncate">{contact.name}</h3>
+                        {contact.relationship_type && (
+                          <Badge variant="secondary" className="text-xs">
+                            {contact.relationship_type}
+                          </Badge>
+                        )}
+                        {contact.source === 'auto' && (
+                          <Badge variant="outline" className="text-xs">
+                            Auto
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="space-y-1 text-sm text-muted-foreground">
+                        {contact.email && <p className="truncate">{contact.email}</p>}
+                        {contact.phone && <p>{contact.phone}</p>}
+                      </div>
+                      {contact.tags && contact.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          {contact.tags.map(tag => (
+                            <Badge key={tag} variant="outline" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex gap-1 ml-2">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          router.push(`/contacts/${contact.id}`)
+                        }}
+                        title="View details"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setContactToDelete(contact)
+                          setDeleteDialogOpen(true)
+                        }}
+                        title="Delete contact"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         )}
-
-        {/* Stats */}
-        {contacts.length > 0 && (
-          <div className="text-center text-sm text-muted-foreground pt-4">
-            Showing {filteredContacts.length} of {contacts.length} contacts
-          </div>
-        )}
-      </main>
+      </div>
 
       {/* Add/Edit Dialog */}
       <AddEditContactDialog
@@ -400,11 +427,25 @@ export default function ContactsPage() {
         contact={editingContact}
         onSaved={() => {
           loadContacts()
+          setDialogOpen(false)
           setEditingContact(null)
         }}
       />
 
-      {/* Delete Confirmation Dialog */}
+      {/* Select Contacts Dialog */}
+      {currentUserId && (
+        <SelectContactsDialog
+          open={showSelectContactsDialog}
+          onOpenChange={setShowSelectContactsDialog}
+          userId={currentUserId}
+          onImported={() => {
+            loadContacts()
+            setShowSelectContactsDialog(false)
+          }}
+        />
+      )}
+
+      {/* Delete Confirmation */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>

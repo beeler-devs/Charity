@@ -1,11 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { Contact, ContactInsert } from '@/types/database.types'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
@@ -14,6 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -21,15 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2, X } from 'lucide-react'
-import { Contact, ContactInsert, ContactUpdate } from '@/types/database.types'
 
 interface AddEditContactDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  contact?: Contact | null
+  contact: Contact | null
   onSaved: () => void
 }
 
@@ -44,13 +43,12 @@ export function AddEditContactDialog({
   const [phone, setPhone] = useState('')
   const [address, setAddress] = useState('')
   const [notes, setNotes] = useState('')
-  const [relationshipType, setRelationshipType] = useState<string>('')
+  const [relationshipType, setRelationshipType] = useState<string>('none')
   const [tags, setTags] = useState<string[]>([])
   const [tagInput, setTagInput] = useState('')
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
 
-  // Reset form when dialog opens/closes or contact changes
   useEffect(() => {
     if (open) {
       if (contact) {
@@ -59,7 +57,7 @@ export function AddEditContactDialog({
         setPhone(contact.phone || '')
         setAddress(contact.address || '')
         setNotes(contact.notes || '')
-        setRelationshipType(contact.relationship_type || '')
+        setRelationshipType(contact.relationship_type || 'none')
         setTags(contact.tags || [])
       } else {
         setName('')
@@ -67,7 +65,7 @@ export function AddEditContactDialog({
         setPhone('')
         setAddress('')
         setNotes('')
-        setRelationshipType('')
+        setRelationshipType('none')
         setTags([])
       }
       setTagInput('')
@@ -76,9 +74,18 @@ export function AddEditContactDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setLoading(true)
+    
+    if (!name.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Name is required',
+        variant: 'destructive',
+      })
+      return
+    }
 
     try {
+      setLoading(true)
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
 
@@ -88,36 +95,22 @@ export function AddEditContactDialog({
           description: 'You must be logged in',
           variant: 'destructive',
         })
-        setLoading(false)
-        return
-      }
-
-      // Validate that at least one contact method exists
-      if (!email && !phone && !contact?.linked_profile_id) {
-        toast({
-          title: 'Error',
-          description: 'Please provide at least an email, phone, or link to a profile',
-          variant: 'destructive',
-        })
-        setLoading(false)
         return
       }
 
       if (contact) {
         // Update existing contact
-        const updateData: ContactUpdate = {
-          name: name.trim(),
-          email: email.trim() || null,
-          phone: phone.trim() || null,
-          address: address.trim() || null,
-          notes: notes.trim() || null,
-          relationship_type: relationshipType || null,
-          tags: tags.length > 0 ? tags : null,
-        }
-
         const { error } = await supabase
           .from('contacts')
-          .update(updateData)
+          .update({
+            name: name.trim(),
+            email: email.trim() || null,
+            phone: phone.trim() || null,
+            address: address.trim() || null,
+            notes: notes.trim() || null,
+            relationship_type: relationshipType && relationshipType !== 'none' ? relationshipType : null,
+            tags: tags.length > 0 ? tags : null,
+          })
           .eq('id', contact.id)
           .eq('user_id', user.id)
 
@@ -144,7 +137,7 @@ export function AddEditContactDialog({
           phone: phone.trim() || null,
           address: address.trim() || null,
           notes: notes.trim() || null,
-          relationship_type: relationshipType || null,
+          relationship_type: relationshipType && relationshipType !== 'none' ? relationshipType : null,
           tags: tags.length > 0 ? tags : null,
           source: 'manual',
         }
@@ -200,7 +193,7 @@ export function AddEditContactDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{contact ? 'Edit Contact' : 'Add Contact'}</DialogTitle>
           <DialogDescription>
@@ -208,21 +201,19 @@ export function AddEditContactDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="name"
-              placeholder="John Doe"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-            />
-          </div>
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Name *</Label>
+              <Input
+                id="name"
+                placeholder="John Doe"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                required
+              />
+            </div>
 
-          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -231,13 +222,7 @@ export function AddEditContactDialog({
                 placeholder="john@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                disabled={!!contact?.linked_profile_id}
               />
-              {contact?.linked_profile_id && (
-                <p className="text-xs text-muted-foreground">
-                  Email is synced from linked profile
-                </p>
-              )}
             </div>
 
             <div className="space-y-2">
@@ -248,84 +233,89 @@ export function AddEditContactDialog({
                 placeholder="(555) 123-4567"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                disabled={!!contact?.linked_profile_id}
               />
-              {contact?.linked_profile_id && (
-                <p className="text-xs text-muted-foreground">
-                  Phone is synced from linked profile
-                </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="address">Address</Label>
+              <Input
+                id="address"
+                placeholder="123 Main St, City, State"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="relationshipType">Relationship Type</Label>
+              <Select 
+                value={relationshipType} 
+                onValueChange={(value) => setRelationshipType(value || 'none')}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select relationship type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  <SelectItem value="teammate">Teammate</SelectItem>
+                  <SelectItem value="opponent">Opponent</SelectItem>
+                  <SelectItem value="coach">Coach</SelectItem>
+                  <SelectItem value="facility_staff">Facility Staff</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tags</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="tags"
+                  placeholder="Add a tag and press Enter"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleTagInputKeyDown}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAddTag}
+                  disabled={!tagInput.trim()}
+                >
+                  Add
+                </Button>
+              </div>
+              {tags.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {tags.map(tag => (
+                    <span
+                      key={tag}
+                      className="inline-flex items-center gap-1 px-2 py-1 bg-secondary text-secondary-foreground rounded-md text-sm"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveTag(tag)}
+                        className="hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
               )}
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="address">Address</Label>
-            <Input
-              id="address"
-              placeholder="123 Main St, City, State ZIP"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="relationshipType">Relationship Type</Label>
-            <Select value={relationshipType} onValueChange={setRelationshipType}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select relationship type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">None</SelectItem>
-                <SelectItem value="teammate">Teammate</SelectItem>
-                <SelectItem value="opponent">Opponent</SelectItem>
-                <SelectItem value="coach">Coach</SelectItem>
-                <SelectItem value="facility_staff">Facility Staff</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="tags">Tags</Label>
-            <div className="flex gap-2">
-              <Input
-                id="tags"
-                placeholder="Add a tag and press Enter"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={handleTagInputKeyDown}
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Textarea
+                id="notes"
+                placeholder="Additional notes about this contact..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
               />
-              <Button type="button" onClick={handleAddTag} variant="outline">
-                Add
-              </Button>
             </div>
-            {tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-2">
-                {tags.map((tag, idx) => (
-                  <Badge key={idx} variant="secondary" className="gap-1">
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveTag(tag)}
-                      className="ml-1 hover:bg-secondary-foreground/20 rounded-full p-0.5"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="notes">Notes</Label>
-            <Textarea
-              id="notes"
-              placeholder="Additional notes about this contact..."
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-            />
           </div>
 
           <DialogFooter>

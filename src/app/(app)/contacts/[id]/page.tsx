@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { createClient } from '@/lib/supabase/client'
 import { Contact } from '@/types/database.types'
@@ -39,6 +40,14 @@ export default function ContactDetailPage() {
   const [loading, setLoading] = useState(true)
   const [activities, setActivities] = useState<TennisActivity[]>([])
   const [loadingActivities, setLoadingActivities] = useState(true)
+  const [sharedTeams, setSharedTeams] = useState<Array<{
+    team_id: string
+    team_name: string
+    organization: string | null
+    league: string | null
+    year: number | null
+  }>>([])
+  const [loadingSharedTeams, setLoadingSharedTeams] = useState(true)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const { toast } = useToast()
 
@@ -46,6 +55,7 @@ export default function ContactDetailPage() {
     if (contactId) {
       loadContact()
       loadTennisHistory()
+      loadSharedTeams()
     }
   }, [contactId])
 
@@ -268,8 +278,110 @@ export default function ContactDetailPage() {
   useEffect(() => {
     if (contact) {
       loadTennisHistory()
+      loadSharedTeams()
     }
   }, [contact])
+
+  async function loadSharedTeams() {
+    try {
+      setLoadingSharedTeams(true)
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (!user || !contact) return
+
+      // Find teams where both user and contact are/were roster members
+      // Contact can be identified by linked_profile_id or email
+      let contactRosterQuery = supabase
+        .from('roster_members')
+        .select(`
+          team_id,
+          teams!inner(
+            id,
+            name,
+            organization,
+            league,
+            year
+          )
+        `)
+
+      if (contact.linked_profile_id) {
+        // Contact has an account - find by user_id
+        contactRosterQuery = contactRosterQuery.eq('user_id', contact.linked_profile_id)
+      } else if (contact.email) {
+        // Contact doesn't have account - find by email
+        contactRosterQuery = contactRosterQuery
+          .eq('email', contact.email.toLowerCase())
+          .is('user_id', null)
+      } else {
+        // No way to identify contact
+        setSharedTeams([])
+        setLoadingSharedTeams(false)
+        return
+      }
+
+      const { data: contactRosters, error: contactError } = await contactRosterQuery
+
+      if (contactError) {
+        console.error('Error loading contact rosters:', contactError)
+        setSharedTeams([])
+        return
+      }
+
+      // Get user's roster memberships
+      const { data: userRosters, error: userError } = await supabase
+        .from('roster_members')
+        .select(`
+          team_id,
+          teams!inner(
+            id,
+            name,
+            organization,
+            league,
+            year
+          )
+        `)
+        .eq('user_id', user.id)
+
+      if (userError) {
+        console.error('Error loading user rosters:', userError)
+        setSharedTeams([])
+        return
+      }
+
+      // Find teams where both are members
+      const userTeamIds = new Set(userRosters?.map(r => r.team_id) || [])
+      const shared = contactRosters
+        ?.filter(r => userTeamIds.has(r.team_id))
+        .map(r => {
+          const team = (r as any).teams
+          return {
+            team_id: team.id,
+            team_name: team.name,
+            organization: team.organization,
+            league: team.league,
+            year: team.year,
+          }
+        }) || []
+
+      // Remove duplicates and sort by year (newest first), then by team name
+      const uniqueTeams = Array.from(
+        new Map(shared.map(t => [t.team_id, t])).values()
+      ).sort((a, b) => {
+        if (a.year !== b.year) {
+          return (b.year || 0) - (a.year || 0)
+        }
+        return a.team_name.localeCompare(b.team_name)
+      })
+
+      setSharedTeams(uniqueTeams)
+    } catch (error: any) {
+      console.error('Error loading shared teams:', error)
+      setSharedTeams([])
+    } finally {
+      setLoadingSharedTeams(false)
+    }
+  }
 
   function getInitials(name: string) {
     return name
@@ -428,6 +540,54 @@ export default function ContactDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {/* Shared Teams */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5" />
+                  Teams Together
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {loadingSharedTeams ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                ) : sharedTeams.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                    <p className="text-sm">No shared teams found</p>
+                    <p className="text-xs mt-1">You haven't been on any teams together</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {sharedTeams.map((team) => (
+                      <div
+                        key={team.team_id}
+                        className="flex items-start justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                        onClick={() => router.push(`/teams/${team.team_id}`)}
+                      >
+                        <div className="flex-1">
+                          <h4 className="font-semibold mb-1">{team.team_name}</h4>
+                          <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                            {team.organization && (
+                              <span>{team.organization}</span>
+                            )}
+                            {team.league && (
+                              <span>• {team.league}</span>
+                            )}
+                            {team.year && (
+                              <span>• {team.year}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
 
           <TabsContent value="history" className="space-y-4">
@@ -535,3 +695,4 @@ export default function ContactDetailPage() {
     </div>
   )
 }
+
