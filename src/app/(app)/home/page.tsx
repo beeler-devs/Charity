@@ -6,7 +6,7 @@ import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase/client'
-import { formatDate, formatTime } from '@/lib/utils'
+import { formatDate, formatTime, cn } from '@/lib/utils'
 import { calculateMatchAvailability } from '@/lib/availability-utils'
 import {
   Select,
@@ -89,6 +89,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true)
   const [rosterMemberMap, setRosterMemberMap] = useState<Record<string, string>>({}) // matchId -> rosterMemberId
   const [teamRoster, setTeamRoster] = useState<any[]>([])
+  const [teamCaptainIds, setTeamCaptainIds] = useState<{ captain_id: string | null; co_captain_id: string | null } | null>(null)
   const [teamStats, setTeamStats] = useState<{
     wins: number
     losses: number
@@ -556,10 +557,24 @@ export default function HomePage() {
   async function loadTeamData(teamId: string) {
     const supabase = createClient()
     
+    // Load team to get captain info
+    const { data: teamData } = await supabase
+      .from('teams')
+      .select('captain_id, co_captain_id')
+      .eq('id', teamId)
+      .single()
+
+    if (teamData) {
+      setTeamCaptainIds({
+        captain_id: teamData.captain_id,
+        co_captain_id: teamData.co_captain_id
+      })
+    }
+    
     // Load roster
     const { data: roster } = await supabase
       .from('roster_members')
-      .select('id, full_name, email, phone, ntrp_rating')
+      .select('id, full_name, email, phone, ntrp_rating, user_id')
       .eq('team_id', teamId)
       .eq('is_active', true)
       .order('full_name')
@@ -775,7 +790,7 @@ export default function HomePage() {
         {/* Hero Card - Next Playing */}
         {nextMatch && nextMatch.status === 'in_lineup' ? (
           <Link href={`/teams/${nextMatch.team_id}/matches/${nextMatch.id}`}>
-            <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white hover:from-green-600 hover:to-green-700 transition-colors cursor-pointer">
+            <Card className="bg-gradient-to-br from-green-100 to-green-200 text-green-900 hover:from-green-200 hover:to-green-300 transition-colors cursor-pointer border-green-300">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg">Next Playing</CardTitle>
@@ -793,7 +808,12 @@ export default function HomePage() {
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4" />
                     <span>vs {nextMatch.opponent_name}</span>
-                    <Badge variant="secondary" className="ml-auto bg-white/20 text-white">
+                    <Badge variant="outline" className={cn(
+                      "ml-auto",
+                      nextMatch.is_home 
+                        ? "!bg-blue-100 !text-blue-700 border-blue-300" 
+                        : "!bg-orange-200 !text-orange-800 border-orange-400"
+                    )}>
                       {nextMatch.is_home ? 'Home' : 'Away'}
                     </Badge>
                   </div>
@@ -804,7 +824,7 @@ export default function HomePage() {
                     </div>
                   )}
                   {nextMatch.partner_name && (
-                    <div className="pt-2 border-t border-white/20">
+                    <div className="pt-2 border-t border-green-300">
                       <p className="text-sm">
                         Court {nextMatch.court_slot} with <span className="font-medium">{nextMatch.partner_name}</span>
                       </p>
@@ -915,11 +935,25 @@ export default function HomePage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
+                            <Badge variant="default" className="text-xs shrink-0 !bg-emerald-700 !text-white">
+                              Match
+                            </Badge>
                             <span className="font-medium truncate">
                               vs {match.opponent_name}
                             </span>
                             <Badge variant="outline" className="text-xs shrink-0">
                               {match.team_name}
+                            </Badge>
+                            <Badge 
+                              variant={match.is_home ? "default" : "outline"} 
+                              className={cn(
+                                "text-xs shrink-0",
+                                match.is_home 
+                                  ? "!bg-blue-100 !text-blue-700 border-blue-300" 
+                                  : "!bg-orange-200 !text-orange-800 border-orange-400"
+                              )}
+                            >
+                              {match.is_home ? 'Home' : 'Away'}
                             </Badge>
                           </div>
                           <div className="text-sm text-muted-foreground">
@@ -1093,33 +1127,6 @@ export default function HomePage() {
 
           {/* Right column - Team Info */}
           <div className="space-y-4">
-            {/* Team Selector */}
-            <div>
-              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">
-                Select Team
-              </h2>
-              {teams.length === 0 ? (
-                <Card>
-                  <CardContent className="py-6 text-center">
-                    <Users className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">No teams yet</p>
-                  </CardContent>
-                </Card>
-              ) : (
-                <Select value={selectedTeamId || ''} onValueChange={setSelectedTeamId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a team" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {teams.map((team) => (
-                      <SelectItem key={team.id} value={team.id}>
-                        {team.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
 
             {/* Team Statistics */}
             {selectedTeamId && teamStats && (
@@ -1175,29 +1182,75 @@ export default function HomePage() {
             )}
 
             {/* Team Roster */}
-            {selectedTeamId && teamRoster.length > 0 && (
-              <div>
-                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1 mb-2">
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide px-1">
                   Roster
                 </h2>
+                {teams.length > 1 && (
+                  <Select value={selectedTeamId || ''} onValueChange={setSelectedTeamId}>
+                    <SelectTrigger className="h-7 text-xs w-auto min-w-[120px]">
+                      <SelectValue placeholder="Select team" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {teams.map((team) => (
+                        <SelectItem key={team.id} value={team.id}>
+                          {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              {teams.length === 0 ? (
+                <Card>
+                  <CardContent className="py-6 text-center">
+                    <Users className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                    <p className="text-sm text-muted-foreground">No teams yet</p>
+                  </CardContent>
+                </Card>
+              ) : !selectedTeamId ? (
+                <Card>
+                  <CardContent className="py-6 text-center">
+                    <p className="text-sm text-muted-foreground">Select a team to view roster</p>
+                  </CardContent>
+                </Card>
+              ) : teamRoster.length === 0 ? (
+                <Card>
+                  <CardContent className="py-6 text-center">
+                    <p className="text-sm text-muted-foreground">No players on roster</p>
+                  </CardContent>
+                </Card>
+              ) : (
                 <Card>
                   <CardContent className="p-3">
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {teamRoster.map((member) => (
-                        <div key={member.id} className="flex items-center gap-2 text-sm">
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                              {member.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="truncate">{member.full_name}</span>
-                        </div>
-                      ))}
+                    <div className="space-y-2">
+                      {teamRoster.map((member) => {
+                        const isCaptain = teamCaptainIds && member.user_id && (
+                          member.user_id === teamCaptainIds.captain_id || 
+                          member.user_id === teamCaptainIds.co_captain_id
+                        )
+                        return (
+                          <div key={member.id} className="flex items-center gap-2 text-sm">
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                {member.full_name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span className="truncate flex-1">{member.full_name}</span>
+                            {isCaptain && (
+                              <Badge variant="secondary" className="text-xs shrink-0">
+                                Captain
+                              </Badge>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   </CardContent>
                 </Card>
-              </div>
-            )}
+              )}
+            </div>
 
             {/* Lifetime Statistics */}
             {lifetimeStats && lifetimeStats.totalMatches > 0 && (

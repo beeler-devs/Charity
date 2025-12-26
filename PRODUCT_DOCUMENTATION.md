@@ -1056,17 +1056,34 @@ The app includes several email templates:
 
 ## Appendix
 
+### Technical Specification
+
+For complete technical documentation including database schema, API endpoints, component architecture, business logic, and implementation details, see **[TECHNICAL_SPECIFICATION.md](./TECHNICAL_SPECIFICATION.md)**.
+
+The technical specification includes:
+- Complete database schema with all tables, columns, relationships, constraints, indexes, and RLS policies
+- All API endpoints with request/response formats
+- Component architecture and UI patterns
+- Business logic and algorithms (lineup wizard, recurrence generation, contact sync, etc.)
+- Authentication and authorization flows
+- State management patterns
+- Real-time features implementation
+- Email service integration
+- File structure and organization
+- Configuration and environment setup
+- Data models and TypeScript types
+- UI/UX patterns and design system
+- Complete workflows and user journeys
+- Error handling strategies
+- Performance optimizations
+- Testing recommendations
+- Deployment checklist
+
+This technical specification is designed to be comprehensive enough to rebuild the entire application from scratch.
+
 ### Keyboard Shortcuts
 
 - *Coming soon*
-
-### API Endpoints
-
-- *See API documentation*
-
-### Database Schema
-
-- *See database documentation*
 
 ---
 

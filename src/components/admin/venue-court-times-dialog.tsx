@@ -52,6 +52,12 @@ export function VenueCourtTimesDialog({
   }, [open, venueId])
 
   async function loadCourtTimes() {
+    if (!venueId) {
+      setCourtTimes([])
+      setLoading(false)
+      return
+    }
+
     setLoading(true)
     const supabase = createClient()
     
@@ -64,22 +70,39 @@ export function VenueCourtTimesDialog({
         .order('start_time', { ascending: true })
 
       if (error) {
-        console.error('Error loading court times:', error)
-        toast({
-          title: 'Error',
-          description: 'Failed to load court times',
-          variant: 'destructive',
-        })
+        // Check if table doesn't exist (migration not run)
+        if (error.code === '42P01') {
+          toast({
+            title: 'Table Not Found',
+            description: 'The venue_court_times table does not exist. Please run the migration first.',
+            variant: 'destructive',
+          })
+        } else if (error.code === '42501') {
+          toast({
+            title: 'Access Denied',
+            description: 'You do not have permission to view court times.',
+            variant: 'destructive',
+          })
+        } else {
+          console.error('Error loading court times:', error)
+          toast({
+            title: 'Error',
+            description: error.message || 'Failed to load court times',
+            variant: 'destructive',
+          })
+        }
+        setCourtTimes([])
       } else {
         setCourtTimes(data || [])
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading court times:', error)
       toast({
         title: 'Error',
-        description: 'Failed to load court times',
+        description: error.message || 'Failed to load court times',
         variant: 'destructive',
       })
+      setCourtTimes([])
     } finally {
       setLoading(false)
     }

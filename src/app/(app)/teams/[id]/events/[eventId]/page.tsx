@@ -118,10 +118,12 @@ export default function EventDetailPage() {
     available: AttendeeInfo[]
     unavailable: AttendeeInfo[]
     maybe: AttendeeInfo[]
+    unknown: AttendeeInfo[]
   }>({
     available: [],
     unavailable: [],
-    maybe: []
+    maybe: [],
+    unknown: []
   })
   const { toast } = useToast()
 
@@ -215,14 +217,17 @@ export default function EventDetailPage() {
       const grouped = {
         available: [] as AttendeeInfo[],
         unavailable: [] as AttendeeInfo[],
-        maybe: [] as AttendeeInfo[]
+        maybe: [] as AttendeeInfo[],
+        unknown: [] as AttendeeInfo[]
       }
 
       rosterMembers.forEach(member => {
         const avail = availMap.get(member.id) || null
         const info = { rosterMember: member, availability: avail }
         
-        if (!avail || avail.status === 'unavailable') {
+        if (!avail) {
+          grouped.unknown.push(info)
+        } else if (avail.status === 'unavailable') {
           grouped.unavailable.push(info)
         } else if (avail.status === 'available') {
           grouped.available.push(info)
@@ -319,6 +324,8 @@ export default function EventDetailPage() {
   }
 
   async function updatePlayerAvailability(rosterMemberId: string, newStatus: string) {
+    // Don't allow setting to "unknown" - it's just a display state
+    if (newStatus === 'unknown') return
     if (!isCaptain && !isSystemAdmin) {
       toast({
         title: 'Permission Denied',
@@ -974,10 +981,22 @@ export default function EventDetailPage() {
       <AlertDialog open={showAvailabilityManager} onOpenChange={setShowAvailabilityManager}>
         <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <AlertDialogHeader>
-            <AlertDialogTitle>Manage Availability</AlertDialogTitle>
-            <AlertDialogDescription>
-              Change availability status for team members. Drag players between sections or use the dropdowns.
-            </AlertDialogDescription>
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <AlertDialogTitle>Manage Availability</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Change availability status for team members. Drag players between sections or use the dropdowns.
+                </AlertDialogDescription>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowAvailabilityManager(false)}
+                className="h-6 w-6 -mt-1 -mr-1"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
           </AlertDialogHeader>
           <div className="space-y-4 py-4">
             {/* Available Section */}
@@ -1117,9 +1136,60 @@ export default function EventDetailPage() {
                 )}
               </div>
             </div>
+
+            {/* Unknown Section */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold flex items-center gap-2">
+                <HelpCircle className="h-4 w-4 text-gray-500" />
+                Unknown ({attendees.unknown.length})
+              </h3>
+              <div className="space-y-2 min-h-[100px] border-2 border-dashed border-gray-200 rounded-lg p-3 bg-gray-50/50">
+                {attendees.unknown.map(({ rosterMember }) => (
+                  <div key={rosterMember.id} className="flex items-center justify-between p-2 bg-white rounded border">
+                    <span className="text-sm text-muted-foreground">{rosterMember.full_name}</span>
+                    <Select
+                      value="unknown"
+                      onValueChange={(value) => updatePlayerAvailability(rosterMember.id, value)}
+                    >
+                      <SelectTrigger className="w-32 h-8">
+                        <SelectValue>
+                          <div className="flex items-center gap-2">
+                            <HelpCircle className="h-4 w-4 text-gray-500" />
+                            <span>Unknown</span>
+                          </div>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="available">
+                          <div className="flex items-center gap-2">
+                            <Check className="h-4 w-4 text-green-500" />
+                            <span>Available</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="maybe">
+                          <div className="flex items-center gap-2">
+                            <HelpCircle className="h-4 w-4 text-yellow-500" />
+                            <span>Maybe</span>
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="unavailable">
+                          <div className="flex items-center gap-2">
+                            <X className="h-4 w-4 text-red-500" />
+                            <span>Unavailable</span>
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ))}
+                {attendees.unknown.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">All players have responded</p>
+                )}
+              </div>
+            </div>
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>Close</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setShowAvailabilityManager(false)}>Close</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

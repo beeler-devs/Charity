@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2 } from 'lucide-react'
+import { format } from 'date-fns'
 import { getActivityTypeLabel } from '@/lib/event-type-colors'
 import { ActivityType } from '@/lib/calendar-utils'
 import { getUserActivityTypes, DEFAULT_ACTIVITY_TYPES } from '@/lib/activity-type-utils'
@@ -124,6 +125,11 @@ export function AddPersonalEventDialog({
   }
 
   async function loadVenueCourtTimes(venueId: string) {
+    if (!venueId) {
+      setVenueCourtTimes([])
+      return
+    }
+
     const supabase = createClient()
     try {
       const { data, error } = await supabase
@@ -134,12 +140,19 @@ export function AddPersonalEventDialog({
         .order('start_time', { ascending: true })
 
       if (error) {
-        console.error('Error loading court times:', error)
+        // If table doesn't exist or RLS blocks access, silently fail
+        // This allows the app to work even if the migration hasn't been run
+        if (error.code === '42P01' || error.code === '42501') {
+          console.warn('Court times table not accessible:', error.message)
+        } else {
+          console.error('Error loading court times:', error)
+        }
         setVenueCourtTimes([])
       } else {
         setVenueCourtTimes(data || [])
       }
-    } catch (error) {
+    } catch (error: any) {
+      // Handle network errors and other exceptions
       console.error('Error loading court times:', error)
       setVenueCourtTimes([])
     }
@@ -447,17 +460,18 @@ export function AddPersonalEventDialog({
                   {/* Court Start Times Picker (if venue has court times) */}
                   {venueCourtTimes.length > 0 && locationMode === 'venue' && (
                     <Select
-                      value={useCourtTime && time ? time : 'custom'}
+                      value={(() => {
+                        if (!useCourtTime || !time) return 'custom'
+                        // Check if current time matches any court time
+                        const matchingCourtTime = venueCourtTimes.find(ct => formatTimeForInput(ct.start_time) === time)
+                        return matchingCourtTime ? time : 'custom'
+                      })()}
                       onValueChange={(value) => {
                         if (value === 'custom') {
                           setUseCourtTime(false)
                         } else {
                           setUseCourtTime(true)
-                          // Find the selected court time
-                          const selectedCourtTime = venueCourtTimes.find(ct => formatTimeForInput(ct.start_time) === value)
-                          if (selectedCourtTime) {
-                            setTime(formatTimeForInput(selectedCourtTime.start_time))
-                          }
+                          setTime(value) // value is already in HH:MM format
                         }
                       }}
                     >
