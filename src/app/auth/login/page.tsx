@@ -145,7 +145,9 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
-            <TennisNavLogo />
+            <Link href="/">
+              <TennisNavLogo />
+            </Link>
           </div>
           <CardTitle className="text-2xl">Welcome to TennisLife</CardTitle>
           <CardDescription>
