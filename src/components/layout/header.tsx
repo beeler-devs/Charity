@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client'
 import { formatDistanceToNow } from 'date-fns'
 import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
 import { isImpersonating, getImpersonationState, stopImpersonation } from '@/lib/impersonation'
+import { TennisNavLogo } from '@/components/shared/tennisnav-logo'
 
 interface HeaderProps {
   title: string
@@ -344,7 +345,13 @@ export function Header({ title, showNotifications = true }: HeaderProps) {
 
       <header className={`sticky ${impersonating ? 'top-[42px]' : 'top-0'} z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 safe-area-inset-top`}>
         <div className="flex h-14 items-center justify-between px-4">
-          <h1 className="text-lg font-semibold">{title}</h1>
+          <div className="pt-1">
+            {title ? (
+              <h1 className="text-lg font-semibold">{title}</h1>
+            ) : (
+              <TennisNavLogo />
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {isAdmin && !impersonating && (
               <Link href="/admin">

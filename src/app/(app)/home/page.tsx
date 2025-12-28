@@ -925,14 +925,9 @@ export default function HomePage() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <Header title="TennisLife" />
+      <Header title="" />
 
       <main className="flex-1 p-4">
-        {/* Logo Section */}
-        <div className="flex justify-start mb-6 py-2">
-          <TennisNavLogo />
-        </div>
-
         {/* Announcements Section */}
         <Card className="mb-4 border-blue-200 bg-blue-50">
           <CardContent className="p-4">
@@ -941,7 +936,7 @@ export default function HomePage() {
               <div className="flex-1">
                 <h3 className="font-semibold text-blue-900 mb-1">Announcements</h3>
                 <p className="text-sm text-blue-800">
-                  Welcome to TennisLife! Check your upcoming events and manage your availability.
+                  Welcome! Check your upcoming events and manage your availability.
                 </p>
               </div>
             </div>
