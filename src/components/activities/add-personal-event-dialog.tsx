@@ -23,7 +23,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Search, X, UserCheck, UserX } from 'lucide-react'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { format } from 'date-fns'
 import { getActivityTypeLabel } from '@/lib/event-type-colors'
 import { ActivityType } from '@/lib/calendar-utils'
@@ -71,6 +73,11 @@ export function AddPersonalEventDialog({
   const [availableActivityTypes, setAvailableActivityTypes] = useState<Array<{ value: ActivityType; label: string }>>(DEFAULT_ACTIVITY_TYPES)
   const [venueCourtTimes, setVenueCourtTimes] = useState<Array<{ id: string; start_time: string }>>([])
   const [useCourtTime, setUseCourtTime] = useState(false)
+  const [creatorIsOrganizer, setCreatorIsOrganizer] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<Array<{ id?: string; email: string; name?: string; isAppUser: boolean; source: 'profile' | 'roster' | 'contact' }>>([])
+  const [searching, setSearching] = useState(false)
+  const [selectedAttendees, setSelectedAttendees] = useState<Array<{ id?: string; email: string; name?: string; isAppUser: boolean }>>([])
   const { toast } = useToast()
 
   useEffect(() => {
@@ -204,6 +211,180 @@ export function AddPersonalEventDialog({
       timeUnit: 'week',
       selectedDays: [],
     })
+    setCreatorIsOrganizer(false)
+    setSearchQuery('')
+    setSearchResults([])
+    setSelectedAttendees([])
+  }
+
+  // Debounced search
+  useEffect(() => {
+    if (searchQuery.trim().length >= 2) {
+      const timeoutId = setTimeout(() => {
+        searchUsers(searchQuery.trim())
+      }, 300)
+      
+      return () => clearTimeout(timeoutId)
+    } else {
+      setSearchResults([])
+    }
+  }, [searchQuery])
+
+  async function searchUsers(query: string) {
+    setSearching(true)
+    const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (!user) {
+      setSearchResults([])
+      setSearching(false)
+      return
+    }
+    
+    const searchLower = query.toLowerCase()
+    const results: Array<{ id?: string; email: string; name?: string; isAppUser: boolean; source: 'profile' | 'roster' | 'contact' }> = []
+    const seenUserIds = new Set<string>()
+    const seenEmails = new Set<string>()
+    
+    // Search profiles (app users)
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, email, full_name')
+      .or(`full_name.ilike.%${searchLower}%,email.ilike.%${searchLower}%`)
+      .limit(10)
+    
+    if (profiles) {
+      profiles.forEach(profile => {
+        if (profile.id && profile.email && !seenUserIds.has(profile.id)) {
+          results.push({
+            id: profile.id,
+            email: profile.email,
+            name: profile.full_name || undefined,
+            isAppUser: true,
+            source: 'profile',
+          })
+          seenUserIds.add(profile.id)
+          seenEmails.add(profile.email.toLowerCase())
+        }
+      })
+    }
+    
+    // Search roster members from user's teams (includes non-app users)
+    const { data: userRosterMemberships } = await supabase
+      .from('roster_members')
+      .select('team_id')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+    
+    if (userRosterMemberships && userRosterMemberships.length > 0) {
+      const userTeamIds = userRosterMemberships.map(rm => rm.team_id)
+      
+      const { data: rosterMembers } = await supabase
+        .from('roster_members')
+        .select('user_id, email, full_name')
+        .in('team_id', userTeamIds)
+        .eq('is_active', true)
+        .or(`full_name.ilike.%${searchLower}%,email.ilike.%${searchLower}%`)
+        .limit(10)
+      
+      if (rosterMembers) {
+        rosterMembers.forEach(rm => {
+          const emailLower = rm.email?.toLowerCase()
+          if (emailLower && !seenEmails.has(emailLower)) {
+            results.push({
+              id: rm.user_id || undefined,
+              email: rm.email,
+              name: rm.full_name || undefined,
+              isAppUser: !!rm.user_id,
+              source: 'roster',
+            })
+            if (rm.user_id) seenUserIds.add(rm.user_id)
+            seenEmails.add(emailLower)
+          }
+        })
+      }
+    }
+    
+    // Search contacts (user's personal contacts)
+    const { data: contacts } = await supabase
+      .from('contacts')
+      .select('id, name, email, linked_profile_id')
+      .eq('user_id', user.id)
+      .or(`name.ilike.%${searchLower}%,email.ilike.%${searchLower}%`)
+      .limit(10)
+    
+    if (contacts) {
+      contacts.forEach(contact => {
+        const emailLower = contact.email?.toLowerCase()
+        if (emailLower && !seenEmails.has(emailLower)) {
+          results.push({
+            id: contact.linked_profile_id || undefined,
+            email: contact.email,
+            name: contact.name || undefined,
+            isAppUser: !!contact.linked_profile_id,
+            source: 'contact',
+          })
+          if (contact.linked_profile_id) seenUserIds.add(contact.linked_profile_id)
+          seenEmails.add(emailLower)
+        }
+      })
+    }
+    
+    // Sort results: app users first, then by name
+    results.sort((a, b) => {
+      if (a.isAppUser !== b.isAppUser) {
+        return a.isAppUser ? -1 : 1
+      }
+      return (a.name || a.email).localeCompare(b.name || b.email)
+    })
+    
+    setSearchResults(results)
+    setSearching(false)
+  }
+
+  function handleSelectAttendee(result: { id?: string; email: string; name?: string; isAppUser: boolean }) {
+    // Validate email
+    const emailLower = result.email?.toLowerCase().trim()
+    if (!emailLower) {
+      toast({
+        title: 'Invalid email',
+        description: 'This contact does not have a valid email address',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(emailLower)) {
+      toast({
+        title: 'Invalid email',
+        description: 'Please enter a valid email address',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    // Check if already selected
+    if (selectedAttendees.some(att => att.email.toLowerCase() === emailLower)) {
+      toast({
+        title: 'Already selected',
+        description: 'This person is already in your list',
+        variant: 'default',
+      })
+      return
+    }
+
+    // Add to selected list
+    setSelectedAttendees([...selectedAttendees, { ...result, email: emailLower }])
+    
+    // Clear search
+    setSearchQuery('')
+    setSearchResults([])
+  }
+
+  function removeSelectedAttendee(index: number) {
+    setSelectedAttendees(selectedAttendees.filter((_, i) => i !== index))
   }
 
 
@@ -323,6 +504,9 @@ export function AddPersonalEventDialog({
         }
       }
 
+      // Add organizer status
+      baseEvent.creator_is_organizer = creatorIsOrganizer
+
       return baseEvent
     })
 
@@ -332,12 +516,12 @@ export function AddPersonalEventDialog({
       .select()
 
     if (error) {
-      // Check if error is due to missing recurrence columns
+      // Check if error is due to missing recurrence columns or organizer column
       const errorMsg = error.message.toLowerCase()
-      if (errorMsg.includes('recurrence') || errorMsg.includes('schema cache') || errorMsg.includes('column')) {
+      if (errorMsg.includes('recurrence') || errorMsg.includes('schema cache') || errorMsg.includes('column') || errorMsg.includes('creator_is_organizer')) {
         toast({
           title: 'Database Schema Error',
-          description: 'Please run the personal_activities_migration.sql migration in your Supabase SQL Editor. Make sure it includes the recurrence fields.',
+          description: 'Please run the required migrations in your Supabase SQL Editor (personal_activities_migration.sql and add_creator_is_organizer_migration.sql).',
           variant: 'destructive',
         })
       } else {
@@ -349,6 +533,97 @@ export function AddPersonalEventDialog({
       }
       setLoading(false)
       return
+    }
+
+    // Add attendees to all created events
+    if (data && data.length > 0) {
+      const attendeesToInsert: any[] = []
+
+      // If creator is not organizer, add them as an attendee
+      if (!creatorIsOrganizer) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('email, full_name')
+          .eq('id', user.id)
+          .single()
+
+        if (profile) {
+          data.forEach(event => {
+            attendeesToInsert.push({
+              personal_event_id: event.id,
+              user_id: user.id,
+              email: profile.email,
+              name: profile.full_name || null,
+              availability_status: 'available',
+              added_via: 'self',
+            })
+          })
+        }
+      }
+
+      // Get creator's email to avoid duplicates
+      let creatorEmail: string | null = null
+      if (!creatorIsOrganizer) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('id', user.id)
+          .single()
+        creatorEmail = profile?.email?.toLowerCase() || null
+      }
+
+      // Add selected attendees
+      selectedAttendees.forEach(attendee => {
+        // Validate email before adding
+        const emailLower = attendee.email?.toLowerCase().trim()
+        if (!emailLower) {
+          console.warn('Skipping attendee with empty email:', attendee)
+          return
+        }
+
+        // Skip if this is the creator (they're already being added)
+        if (creatorEmail && emailLower === creatorEmail) {
+          console.log('Skipping creator as attendee (already added)')
+          return
+        }
+
+        data.forEach(event => {
+          attendeesToInsert.push({
+            personal_event_id: event.id,
+            user_id: attendee.isAppUser && attendee.id ? attendee.id : null,
+            email: emailLower,
+            name: attendee.name?.trim() || null,
+            availability_status: 'available',
+            added_via: 'direct',
+          })
+        })
+      })
+
+      if (attendeesToInsert.length > 0) {
+        const { error: attendeeError, data: insertedAttendees } = await supabase
+          .from('event_attendees')
+          .insert(attendeesToInsert)
+          .select()
+
+        if (attendeeError) {
+          console.error('Error adding attendees:', {
+            error: attendeeError,
+            message: attendeeError.message,
+            details: attendeeError.details,
+            hint: attendeeError.hint,
+            code: attendeeError.code,
+            attendeesAttempted: attendeesToInsert.length,
+            sampleAttendee: attendeesToInsert[0],
+          })
+          toast({
+            title: 'Warning',
+            description: attendeeError.message || 'Activity created but some attendees could not be added',
+            variant: 'default',
+          })
+        } else if (insertedAttendees) {
+          console.log(`Successfully added ${insertedAttendees.length} attendee records`)
+        }
+      }
     }
 
     toast({
@@ -364,8 +639,6 @@ export function AddPersonalEventDialog({
     setLoading(false)
   }
 
-  // Get today's date in YYYY-MM-DD format for min date
-  const today = new Date().toISOString().split('T')[0]
 
   // Generate duration options (5 minute increments from 15 to 240 minutes)
   const durationOptions = []
@@ -451,7 +724,6 @@ export function AddPersonalEventDialog({
                     type="date"
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
-                    min={today}
                     required
                   />
                 </div>
@@ -584,6 +856,144 @@ export function AddPersonalEventDialog({
                   placeholder="Add any additional details about this activity..."
                   rows={3}
                 />
+              </div>
+
+              {/* Organizer Option */}
+              <div className="flex items-center space-x-2 pt-2">
+                <Checkbox
+                  id="creator-is-organizer"
+                  checked={creatorIsOrganizer}
+                  onCheckedChange={(checked) => setCreatorIsOrganizer(checked === true)}
+                />
+                <Label 
+                  htmlFor="creator-is-organizer" 
+                  className="text-sm font-normal cursor-pointer"
+                >
+                  I'm organizing this (not participating)
+                </Label>
+              </div>
+              <p className="text-xs text-muted-foreground -mt-2 mb-2">
+                {creatorIsOrganizer 
+                  ? "You'll be listed as the organizer and won't be included in the attendee count."
+                  : "You'll be automatically added as an attendee and included in the attendee count."}
+              </p>
+
+              {/* Add Attendees Section */}
+              <div className="space-y-4 pt-4 border-t">
+                <div className="space-y-2">
+                  <Label>Add Attendees (Optional)</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by name or email..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9"
+                    />
+                    {searching && (
+                      <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+
+                  {/* Search Results */}
+                  {searchResults.length > 0 && (
+                    <div className="border rounded-md max-h-48 overflow-y-auto">
+                      {searchResults
+                        .filter(result => result.email && result.email.trim()) // Filter out results without email
+                        .map((result, idx) => {
+                          const isAlreadySelected = selectedAttendees.some(att => att.email.toLowerCase() === result.email.toLowerCase())
+                          
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => handleSelectAttendee(result)}
+                              disabled={isAlreadySelected}
+                              className={`w-full p-2 flex items-center gap-2 text-left ${
+                                isAlreadySelected
+                                  ? 'opacity-50 cursor-not-allowed'
+                                  : 'hover:bg-muted'
+                              }`}
+                            >
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback>
+                                {(result.name || result.email)[0].toUpperCase()}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium truncate">
+                                  {result.name || result.email}
+                                </span>
+                                {result.isAppUser ? (
+                                  <Badge variant="secondary" className="text-xs">
+                                    <UserCheck className="h-3 w-3 mr-1" />
+                                    App User
+                                  </Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-xs">
+                                    <UserX className="h-3 w-3 mr-1" />
+                                    Not on App
+                                  </Badge>
+                                )}
+                                {isAlreadySelected && (
+                                  <Badge variant="default" className="text-xs">
+                                    Selected
+                                  </Badge>
+                                )}
+                              </div>
+                              {result.name && (
+                                <p className="text-sm text-muted-foreground truncate">
+                                  {result.email}
+                                </p>
+                              )}
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Attendees List */}
+                {selectedAttendees.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Selected Attendees ({selectedAttendees.length})</Label>
+                    <div className="border rounded-md max-h-48 overflow-y-auto space-y-1 p-2">
+                      {selectedAttendees.map((attendee, idx) => (
+                        <div
+                          key={idx}
+                          className="flex items-center gap-2 p-2 bg-muted rounded-md"
+                        >
+                          <Avatar className="h-8 w-8">
+                            <AvatarFallback>
+                              {(attendee.name || attendee.email)[0].toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">
+                              {attendee.name || attendee.email}
+                            </div>
+                            {attendee.name && (
+                              <div className="text-sm text-muted-foreground truncate">
+                                {attendee.email}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            onClick={() => removeSelectedAttendee(idx)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Recurring Activity Options */}

@@ -34,6 +34,7 @@ import { useToast } from '@/hooks/use-toast'
 import { startOfWeek, addDays } from 'date-fns'
 import { getTeamColor } from '@/lib/team-colors'
 import { cn, formatDate } from '@/lib/utils'
+import { getEffectiveUserId, getEffectiveUserEmail } from '@/lib/impersonation'
 
 type ViewMode = 'week' | 'month' | 'list'
 
@@ -56,6 +57,7 @@ export default function CalendarPage() {
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>([])
   const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match', 'practice', 'warmup', 'other'])
   const [showPersonalActivities, setShowPersonalActivities] = useState(true)
+  const [hideOrganizerOnlyEvents, setHideOrganizerOnlyEvents] = useState(false)
   const [loading, setLoading] = useState(true)
   const [teamsLoaded, setTeamsLoaded] = useState(false)
   const [showAddEventDialog, setShowAddEventDialog] = useState(false)
@@ -79,6 +81,10 @@ export default function CalendarPage() {
         setNumWeeks(parsed)
       }
     }
+    const savedHideOrganizerOnly = localStorage.getItem('calendar-hide-organizer-only')
+    if (savedHideOrganizerOnly === 'true') {
+      setHideOrganizerOnlyEvents(true)
+    }
   }, [])
 
   useEffect(() => {
@@ -91,7 +97,7 @@ export default function CalendarPage() {
     if (teamsLoaded) {
       loadCalendarData()
     }
-  }, [currentDate, viewMode, numWeeks, teams, selectedTeamIds, selectedEventTypes, teamsLoaded, showPersonalActivities])
+  }, [currentDate, viewMode, numWeeks, teams, selectedTeamIds, selectedEventTypes, teamsLoaded, showPersonalActivities, hideOrganizerOnlyEvents])
 
   async function loadTeams() {
     const supabase = createClient()
@@ -102,18 +108,21 @@ export default function CalendarPage() {
       return
     }
 
+    // Get effective user ID (impersonated or logged-in)
+    const effectiveUserId = getEffectiveUserId(user.id)
+
     // Get all teams user is a member of
     const { data: rosterData } = await supabase
       .from('roster_members')
       .select('team_id, teams!inner(id, name)')
-      .eq('user_id', user.id)
+      .eq('user_id', effectiveUserId)
       .eq('is_active', true)
 
     // Get teams where user is captain or co-captain
     const { data: captainTeams } = await supabase
       .from('teams')
       .select('id, name, captain_id, co_captain_id')
-      .or(`captain_id.eq.${user.id},co_captain_id.eq.${user.id}`)
+      .or(`captain_id.eq.${effectiveUserId},co_captain_id.eq.${effectiveUserId}`)
 
     // Build a map of team IDs to captain status
     const captainTeamIds = new Set(
@@ -155,6 +164,11 @@ export default function CalendarPage() {
       setLoading(false)
       return
     }
+
+    // Get effective user ID and email (impersonated or logged-in)
+    const effectiveUserId = getEffectiveUserId(user.id)
+    const userProfile = await supabase.from('profiles').select('email').eq('id', effectiveUserId).single()
+    const effectiveUserEmail = getEffectiveUserEmail(userProfile.data?.email || null)
 
     // Determine date range based on view mode
     // For list view, load all upcoming items (no end date limit)
@@ -259,7 +273,7 @@ export default function CalendarPage() {
       const { data: createdActivities } = await supabase
         .from('personal_events')
         .select('*')
-        .eq('creator_id', user.id)
+        .eq('creator_id', effectiveUserId)
         .gte('date', dateRange.start)
       
       if (viewMode !== 'list') {
@@ -267,7 +281,7 @@ export default function CalendarPage() {
         const { data: createdActivitiesFiltered } = await supabase
           .from('personal_events')
           .select('*')
-          .eq('creator_id', user.id)
+          .eq('creator_id', effectiveUserId)
           .gte('date', dateRange.start)
           .lte('date', dateRange.end)
           .order('date', { ascending: true })
@@ -275,6 +289,11 @@ export default function CalendarPage() {
 
         if (createdActivitiesFiltered) {
           createdActivitiesFiltered.forEach((activity: any) => {
+            // Filter out events where user is organizing but not participating
+            if (hideOrganizerOnlyEvents && activity.creator_is_organizer) {
+              return
+            }
+            
             items.push({
               id: activity.id,
               type: 'personal_activity',
@@ -295,13 +314,18 @@ export default function CalendarPage() {
         const { data: createdActivitiesList } = await supabase
           .from('personal_events')
           .select('*')
-          .eq('creator_id', user.id)
+          .eq('creator_id', effectiveUserId)
           .gte('date', dateRange.start)
           .order('date', { ascending: true })
           .order('time', { ascending: true })
 
         if (createdActivitiesList) {
           createdActivitiesList.forEach((activity: any) => {
+            // Filter out events where user is organizing but not participating
+            if (hideOrganizerOnlyEvents && activity.creator_is_organizer) {
+              return
+            }
+            
             items.push({
               id: activity.id,
               type: 'personal_activity',
@@ -319,14 +343,19 @@ export default function CalendarPage() {
         }
       }
 
-      // Load activities user is invited to
-      const userEmail = (await supabase.from('profiles').select('email').eq('id', user.id).single()).data?.email
-      
+      // Load activities user is invited to or is an attendee of
       const { data: invitations } = await supabase
         .from('event_invitations')
         .select('*, personal_events(*)')
-        .or(`invitee_id.eq.${user.id},invitee_email.eq.${userEmail || ''}`)
+        .or(`invitee_id.eq.${effectiveUserId},invitee_email.eq.${effectiveUserEmail || ''}`)
         .in('status', ['pending', 'accepted'])
+        .gte('personal_events.date', dateRange.start)
+
+      // Also load activities where user is an attendee (but not creator and not invited)
+      const { data: attendeeActivities } = await supabase
+        .from('event_attendees')
+        .select('*, personal_events(*)')
+        .or(`user_id.eq.${effectiveUserId},email.eq.${effectiveUserEmail || ''}`)
         .gte('personal_events.date', dateRange.start)
 
       if (invitations) {
@@ -349,6 +378,31 @@ export default function CalendarPage() {
         })
       }
 
+      // Add activities where user is an attendee (but not creator and not already added via invitation)
+      if (attendeeActivities) {
+        const existingActivityIds = new Set(items.filter(i => i.type === 'personal_activity').map(i => i.id))
+        attendeeActivities.forEach((att: any) => {
+          if (att.personal_events && 
+              !existingActivityIds.has(att.personal_events.id) &&
+              att.personal_events.creator_id !== effectiveUserId &&
+              (!viewMode || viewMode === 'list' || att.personal_events.date <= dateRange.end)) {
+            items.push({
+              id: att.personal_events.id,
+              type: 'personal_activity',
+              date: att.personal_events.date,
+              time: att.personal_events.time,
+              duration: att.personal_events.duration || null,
+              teamId: att.personal_events.team_id || undefined,
+              teamName: undefined,
+              teamColor: null,
+              name: att.personal_events.title,
+              activityType: att.personal_events.activity_type,
+              creatorId: att.personal_events.creator_id,
+            })
+          }
+        })
+      }
+
       // Load user's attendee status for personal activities
       const personalActivityIds = items.filter(i => i.type === 'personal_activity').map(i => i.id)
       if (personalActivityIds.length > 0) {
@@ -356,7 +410,7 @@ export default function CalendarPage() {
           .from('event_attendees')
           .select('personal_event_id, availability_status')
           .in('personal_event_id', personalActivityIds)
-          .or(`user_id.eq.${user.id},email.eq.${userEmail || ''}`)
+          .or(`user_id.eq.${effectiveUserId},email.eq.${effectiveUserEmail || ''}`)
 
         if (attendees) {
           attendees.forEach((att: any) => {
@@ -498,6 +552,13 @@ export default function CalendarPage() {
       }
     }
 
+    // Sort all items chronologically by date and time
+    items.sort((a, b) => {
+      const dateCompare = a.date.localeCompare(b.date)
+      if (dateCompare !== 0) return dateCompare
+      return a.time.localeCompare(b.time)
+    })
+
     // Filter items based on personal activities toggle
     const filteredItems = showPersonalActivities 
       ? items 
@@ -529,25 +590,22 @@ export default function CalendarPage() {
 
   async function updateAvailability(item: CalendarItem, rosterMemberId: string, status: 'available' | 'maybe' | 'unavailable') {
     const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
+
+    // Get effective user ID and email (impersonated or logged-in)
+    const effectiveUserId = getEffectiveUserId(user.id)
+    const userProfile = await supabase.from('profiles').select('email').eq('id', effectiveUserId).single()
+    const effectiveUserEmail = getEffectiveUserEmail(userProfile.data?.email || null)
     
     // Handle personal activities differently
     if (item.type === 'personal_activity') {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('email')
-        .eq('id', user.id)
-        .single()
-      const userEmail = profileData?.email
-
       // Check if attendee record exists
       const { data: existingAttendee } = await supabase
         .from('event_attendees')
         .select('id')
         .eq('personal_event_id', item.id)
-        .or(`user_id.eq.${user.id},email.eq.${userEmail || ''}`)
+        .or(`user_id.eq.${effectiveUserId},email.eq.${effectiveUserEmail || ''}`)
         .maybeSingle()
 
       let error = null
@@ -558,16 +616,16 @@ export default function CalendarPage() {
           .eq('id', existingAttendee.id)
         error = result.error
       } else {
-        const insertData: any = {
-          personal_event_id: item.id,
-          availability_status: status,
-        }
-        if (user.id) {
-          insertData.user_id = user.id
-        }
-        if (userEmail) {
-          insertData.email = userEmail
-        }
+          const insertData: any = {
+            personal_event_id: item.id,
+            availability_status: status,
+          }
+          if (effectiveUserId) {
+            insertData.user_id = effectiveUserId
+          }
+          if (effectiveUserEmail) {
+            insertData.email = effectiveUserEmail
+          }
         const result = await supabase
           .from('event_attendees')
           .insert(insertData)
@@ -1061,7 +1119,7 @@ export default function CalendarPage() {
 
         {/* Personal Activities Filter */}
         <Card>
-          <CardContent className="p-2">
+          <CardContent className="p-2 space-y-2">
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground mr-1">Personal Activities:</span>
               <Button
@@ -1073,6 +1131,25 @@ export default function CalendarPage() {
                 {showPersonalActivities ? 'Show' : 'Hide'}
               </Button>
             </div>
+            {showPersonalActivities && (
+              <div className="flex items-center gap-2 pl-1">
+                <Checkbox
+                  id="hide-organizer-only"
+                  checked={hideOrganizerOnlyEvents}
+                  onCheckedChange={(checked) => {
+                    const isChecked = checked === true
+                    setHideOrganizerOnlyEvents(isChecked)
+                    localStorage.setItem('calendar-hide-organizer-only', isChecked.toString())
+                  }}
+                />
+                <label 
+                  htmlFor="hide-organizer-only" 
+                  className="text-xs text-muted-foreground cursor-pointer"
+                >
+                  Hide events I'm organizing (not participating)
+                </label>
+              </div>
+            )}
           </CardContent>
         </Card>
 

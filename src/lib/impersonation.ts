@@ -89,3 +89,32 @@ export function getImpersonatedUserId(): string | null {
   return state?.impersonatedUserId || null
 }
 
+/**
+ * Get impersonated user email (for API calls that need to know the target user's email)
+ */
+export function getImpersonatedUserEmail(): string | null {
+  if (typeof window === 'undefined') return null
+  const state = getImpersonationState()
+  return state?.impersonatedUserEmail || null
+}
+
+/**
+ * Get the effective user ID to use for queries
+ * Returns impersonated user ID if impersonating, otherwise returns the provided logged-in user ID
+ */
+export function getEffectiveUserId(loggedInUserId: string | null): string | null {
+  if (typeof window === 'undefined') return loggedInUserId
+  const impersonatedId = getImpersonatedUserId()
+  return impersonatedId || loggedInUserId
+}
+
+/**
+ * Get the effective user email to use for queries
+ * Returns impersonated user email if impersonating, otherwise returns the provided logged-in user email
+ */
+export function getEffectiveUserEmail(loggedInUserEmail: string | null): string | null {
+  if (typeof window === 'undefined') return loggedInUserEmail
+  const impersonatedEmail = getImpersonatedUserEmail()
+  return impersonatedEmail || loggedInUserEmail
+}
+

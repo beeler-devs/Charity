@@ -89,6 +89,7 @@ export interface PersonalEvent {
     timeUnit: 'day' | 'week' | 'month' | 'year'
     selectedDays?: number[] // 0=Sunday, 1=Monday, ..., 6=Saturday (for weekly patterns)
   } | null
+  creator_is_organizer?: boolean | null
   created_at?: string
   updated_at?: string
 }

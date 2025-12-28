@@ -15,31 +15,17 @@ import {
   Smartphone,
   Clock,
   Target,
+  Bell,
   Sparkles,
   ArrowRight,
+  PlayCircle,
   FileText,
+  UserCheck,
   CalendarCheck,
   Mail,
 } from 'lucide-react'
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 
 export default function LandingPage() {
-  const router = useRouter()
-
-  useEffect(() => {
-    // Check if user is already logged in
-    const checkAuth = async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-  if (user) {
-        router.push('/home')
-      }
-    }
-    checkAuth()
-  }, [router])
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-50 via-white to-lime-50">
       {/* Navigation */}
@@ -494,3 +480,4 @@ export default function LandingPage() {
     </div>
   )
 }
+

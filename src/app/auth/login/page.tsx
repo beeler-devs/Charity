@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 import { Loader2, Mail } from 'lucide-react'
+import { TennisNavLogo } from '@/components/shared/tennisnav-logo'
 
 export default function LoginPage() {
   const [email, setEmail] = useState('')
@@ -143,6 +144,11 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
+          <div className="flex justify-center mb-4">
+            <Link href="/">
+              <TennisNavLogo />
+            </Link>
+          </div>
           <CardTitle className="text-2xl">Welcome to TennisLife</CardTitle>
           <CardDescription>
             Sign in to manage your tennis teams

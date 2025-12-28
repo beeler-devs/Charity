@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { createClient } from '@/lib/supabase/client'
 import { PersonalEvent, EventInvitation, EventAttendee } from '@/types/database.types'
 import { formatDate, formatTime } from '@/lib/utils'
+import { getEffectiveUserId, getEffectiveUserEmail } from '@/lib/impersonation'
 import { Plus, Calendar, ArrowLeft, Users, Clock, ChevronRight } from 'lucide-react'
 import { AddPersonalEventDialog } from '@/components/activities/add-personal-event-dialog'
 import { ActivityTypeBadge } from '@/components/activities/activity-type-badge'
@@ -63,11 +64,16 @@ export default function ActivitiesPage() {
 
       const today = new Date().toISOString().split('T')[0]
 
+      // Get effective user ID and email (impersonated or logged-in)
+      const effectiveUserId = getEffectiveUserId(user.id)
+      const userProfile = await supabase.from('profiles').select('id, email, full_name').eq('id', effectiveUserId).single()
+      const effectiveUserEmail = getEffectiveUserEmail(userProfile.data?.email || null)
+
       // Load activities user created
       const { data: created } = await supabase
         .from('personal_events')
         .select('*')
-        .eq('creator_id', user.id)
+        .eq('creator_id', effectiveUserId)
         .order('date', { ascending: true })
         .order('time', { ascending: true })
 
@@ -75,8 +81,14 @@ export default function ActivitiesPage() {
       const { data: invitations } = await supabase
         .from('event_invitations')
         .select('*, personal_events(*)')
-        .or(`invitee_id.eq.${user.id},invitee_email.eq.${(await supabase.from('profiles').select('email').eq('id', user.id).single()).data?.email}`)
+        .or(`invitee_id.eq.${effectiveUserId},invitee_email.eq.${effectiveUserEmail || ''}`)
         .in('status', ['pending', 'accepted'])
+
+      // Also load activities where user is an attendee (but not creator and not invited)
+      const { data: attendeeActivities } = await supabase
+        .from('event_attendees')
+        .select('*, personal_events(*)')
+        .or(`user_id.eq.${effectiveUserId},email.eq.${effectiveUserEmail || ''}`)
 
       // Load attendees for created activities
       if (created) {
@@ -86,13 +98,6 @@ export default function ActivitiesPage() {
           .select('id, personal_event_id, name, email, user_id, availability_status, profiles(id, full_name)')
           .in('personal_event_id', activityIds)
           .order('created_at', { ascending: true })
-
-        // Get user's profile for creator display
-        const { data: userProfile } = await supabase
-          .from('profiles')
-          .select('id, email, full_name')
-          .eq('id', user.id)
-          .single()
 
         // Group attendees by activity
         const attendeesByActivity: Record<string, Array<any>> = {}
@@ -114,18 +119,19 @@ export default function ActivitiesPage() {
         const createdWithDetails: ActivityWithDetails[] = created.map(activity => {
           const activityAttendees = attendeesByActivity[activity.id] || []
           const creatorIsAttendee = activityAttendees.some(
-            (att: any) => att.user_id === user.id || att.email === userProfile?.email
+            (att: any) => att.user_id === effectiveUserId || att.email === effectiveUserEmail
           )
+          const isOrganizer = activity.creator_is_organizer || false
           
-          // If creator is not in attendees list, add them
+          // If creator is not organizer and not in attendees list, add them
           let finalAttendees = [...activityAttendees]
-          if (!creatorIsAttendee && userProfile) {
+          if (!isOrganizer && !creatorIsAttendee && userProfile?.data) {
             finalAttendees.unshift({
               id: `creator-${activity.id}`,
-              user_id: user.id,
-              email: userProfile.email,
-              name: userProfile.full_name || null,
-              profiles: { full_name: userProfile.full_name },
+              user_id: effectiveUserId,
+              email: effectiveUserEmail || userProfile.data.email,
+              name: userProfile.data.full_name || null,
+              profiles: { full_name: userProfile.data.full_name },
               availability_status: 'available',
               added_via: 'self',
             })
@@ -146,13 +152,6 @@ export default function ActivitiesPage() {
         const invitedActivityIds = invitations
           .map((inv: any) => inv.personal_events?.id)
           .filter(Boolean)
-        
-        // Get user's profile for display
-        const { data: userProfile } = await supabase
-          .from('profiles')
-          .select('id, email, full_name')
-          .eq('id', user.id)
-          .single()
         
         // Load attendees for invited activities
         let invitedAttendeesByActivity: Record<string, Array<any>> = {}
@@ -179,18 +178,18 @@ export default function ActivitiesPage() {
             
             const activityAttendees = invitedAttendeesByActivity[activity.id] || []
             const userIsAttendee = activityAttendees.some(
-              (att: any) => att.user_id === user.id || att.email === userProfile?.email
+              (att: any) => att.user_id === effectiveUserId || att.email === effectiveUserEmail
             )
             
             // If user is not in attendees list but is invited, add them
             let finalAttendees = [...activityAttendees]
-            if (!userIsAttendee && userProfile) {
+            if (!userIsAttendee && userProfile?.data) {
               finalAttendees.push({
                 id: `user-${activity.id}`,
-                user_id: user.id,
-                email: userProfile.email,
-                name: userProfile.full_name || null,
-                profiles: { full_name: userProfile.full_name },
+                user_id: effectiveUserId,
+                email: effectiveUserEmail || userProfile.data.email,
+                name: userProfile.data.full_name || null,
+                profiles: { full_name: userProfile.data.full_name },
                 availability_status: inv.status === 'accepted' ? 'available' : 'maybe',
                 added_via: 'invitation',
               })
@@ -204,7 +203,60 @@ export default function ActivitiesPage() {
             }
           })
           .filter((activity: any) => activity !== null) // Filter out nulls
-        setInvitedActivities(invitedWithDetails)
+        
+        // Process attendee activities (where user is an attendee but not creator and not invited)
+        const createdActivityIds = new Set((created || []).map(a => a.id))
+        const invitedActivityIdsSet = new Set(invitedWithDetails.map(a => a.id))
+        
+        let allInvitedActivities = [...invitedWithDetails]
+        
+        if (attendeeActivities) {
+          // Load all attendees for attendee-only activities
+          const attendeeOnlyActivityIds = attendeeActivities
+            .map((att: any) => att.personal_events?.id)
+            .filter((id: string) => id && !createdActivityIds.has(id) && !invitedActivityIdsSet.has(id))
+          
+          let attendeeOnlyAttendeesByActivity: Record<string, Array<any>> = {}
+          if (attendeeOnlyActivityIds.length > 0) {
+            const { data: allAttendees } = await supabase
+              .from('event_attendees')
+              .select('id, personal_event_id, name, email, user_id, profiles(id, full_name)')
+              .in('personal_event_id', attendeeOnlyActivityIds)
+              .order('created_at', { ascending: true })
+            
+            allAttendees?.forEach(att => {
+              const eventId = att.personal_event_id
+              if (!attendeeOnlyAttendeesByActivity[eventId]) {
+                attendeeOnlyAttendeesByActivity[eventId] = []
+              }
+              attendeeOnlyAttendeesByActivity[eventId].push(att)
+            })
+          }
+          
+          const attendeeOnlyActivities: ActivityWithDetails[] = attendeeActivities
+            .filter((att: any) => 
+              att.personal_events && 
+              !createdActivityIds.has(att.personal_events.id) &&
+              !invitedActivityIdsSet.has(att.personal_events.id)
+            )
+            .map((att: any) => {
+              const activity = att.personal_events
+              const activityAttendees = attendeeOnlyAttendeesByActivity[activity.id] || []
+              
+              return {
+                ...activity,
+                isCreator: false,
+                attendee: att,
+                attendeeCount: activityAttendees.length,
+                attendees: activityAttendees,
+              } as ActivityWithDetails
+            })
+          
+          // Merge attendee-only activities with invited activities
+          allInvitedActivities = [...allInvitedActivities, ...attendeeOnlyActivities]
+        }
+        
+        setInvitedActivities(allInvitedActivities)
       }
     } catch (error) {
       console.error('Error loading activities:', error)
