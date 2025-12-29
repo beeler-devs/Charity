@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, Suspense } from 'react'
+import { useEffect, useState, Suspense, use } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Header } from '@/components/layout/header'
 import { Button } from '@/components/ui/button'
@@ -37,7 +37,11 @@ interface TeamEvent {
 function TeamAvailabilityContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const teamId = searchParams.get('teamId')
+  // Handle async searchParams in Next.js 15 - useSearchParams() returns a Promise in some contexts
+  const resolvedSearchParams = searchParams && typeof searchParams === 'object' && 'then' in searchParams
+    ? use(searchParams as unknown as Promise<URLSearchParams>)
+    : searchParams
+  const teamId = resolvedSearchParams.get('teamId')
   const [events, setEvents] = useState<TeamEvent[]>([])
   const [allEvents, setAllEvents] = useState<TeamEvent[]>([]) // Store all events for filtering
   const [teams, setTeams] = useState<Array<{ id: string; name: string; color?: string | null }>>([])
