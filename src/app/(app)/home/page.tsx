@@ -26,6 +26,7 @@ import {
   MinusCircle,
   Trophy,
   ChevronRight,
+  ChevronDown,
   Check,
   X,
   HelpCircle,
@@ -67,6 +68,21 @@ interface UpcomingEvent {
   team_name: string
   availability?: {
     status: string
+  }
+  availabilitySummary?: {
+    available: number
+    unavailable: number
+    unsure: number
+    lastResort: number
+    notSet: number
+    total: number
+  }
+  availabilityDetails?: {
+    available: Array<{ id: string; name: string }>
+    unavailable: Array<{ id: string; name: string }>
+    unsure: Array<{ id: string; name: string }>
+    lastResort: Array<{ id: string; name: string }>
+    notSet: Array<{ id: string; name: string }>
   }
 }
 
@@ -129,6 +145,13 @@ export default function HomePage() {
     winPercentage: number
   } | null>(null)
   const [teamMatchTypes, setTeamMatchTypes] = useState<Record<string, string[]>>({})
+  const [expandedEventAvailability, setExpandedEventAvailability] = useState<Record<string, {
+    available: boolean
+    unavailable: boolean
+    unsure: boolean
+    lastResort: boolean
+    notSet: boolean
+  }>>({})
   const { toast } = useToast()
 
   useEffect(() => {
@@ -532,22 +555,79 @@ export default function HomePage() {
       .order('time', { ascending: true })
       .limit(10)
 
-    // Get availability for events
+    // Get availability for events - load ALL availability for all team members, not just current user
     const eventIds = events?.map(e => e.id) || []
+    
+    // Load all roster members for all teams that have events
+    const teamIdsWithEvents = [...new Set(events?.map(e => e.team_id) || [])]
+    const { data: allTeamRosterMembers } = await supabase
+      .from('roster_members')
+      .select('id, full_name, team_id')
+      .in('team_id', teamIdsWithEvents)
+      .eq('is_active', true)
+    
+    // Load all availability for these events (all roster members)
+    const allRosterMemberIds = allTeamRosterMembers?.map(rm => rm.id) || []
     const { data: eventAvailabilities } = await supabase
       .from('availability')
       .select('*')
       .in('event_id', eventIds)
-      .in('roster_member_id', rosterMemberIds)
+      .in('roster_member_id', allRosterMemberIds)
+
+    // Create roster member map by team
+    const rosterByTeam: Record<string, Array<{ id: string; full_name: string }>> = {}
+    allTeamRosterMembers?.forEach(rm => {
+      if (!rosterByTeam[rm.team_id]) {
+        rosterByTeam[rm.team_id] = []
+      }
+      rosterByTeam[rm.team_id].push({ id: rm.id, full_name: rm.full_name })
+    })
 
     // Process events
     const processedEvents: UpcomingEvent[] = (events || []).map(event => {
       const membership = memberships.find(m => m.team_id === event.team_id)
       const memberRosterId = membership?.id
       
+      // Current user's availability
       const availability = eventAvailabilities?.find(a =>
         a.event_id === event.id && a.roster_member_id === memberRosterId
       )
+
+      // Calculate availability summary for this event
+      const teamRoster = rosterByTeam[event.team_id] || []
+      const teamAvailability = eventAvailabilities?.filter(a => a.event_id === event.id) || []
+      const respondedIds = new Set(teamAvailability.map(a => a.roster_member_id))
+      
+      const availablePlayers: Array<{ id: string; name: string }> = []
+      const unavailablePlayers: Array<{ id: string; name: string }> = []
+      const unsurePlayers: Array<{ id: string; name: string }> = []
+      const lastResortPlayers: Array<{ id: string; name: string }> = []
+      const notSetPlayers: Array<{ id: string; name: string }> = []
+
+      // Process availability responses
+      teamAvailability.forEach(avail => {
+        const rosterMember = teamRoster.find(rm => rm.id === avail.roster_member_id)
+        if (!rosterMember) return
+        
+        const playerInfo = { id: rosterMember.id, name: rosterMember.full_name }
+        
+        if (avail.status === 'available') {
+          availablePlayers.push(playerInfo)
+        } else if (avail.status === 'unavailable') {
+          unavailablePlayers.push(playerInfo)
+        } else if (avail.status === 'maybe') {
+          unsurePlayers.push(playerInfo)
+        } else if (avail.status === 'last_resort') {
+          lastResortPlayers.push(playerInfo)
+        }
+      })
+
+      // Add players without responses as "not set"
+      teamRoster.forEach(rm => {
+        if (!respondedIds.has(rm.id)) {
+          notSetPlayers.push({ id: rm.id, name: rm.full_name })
+        }
+      })
 
       return {
         id: event.id,
@@ -558,7 +638,22 @@ export default function HomePage() {
         location: event.location,
         team_id: event.team_id,
         team_name: (Array.isArray(event.teams) ? event.teams[0] : event.teams)?.name || 'Unknown',
-        availability: availability ? { status: availability.status } : undefined
+        availability: availability ? { status: availability.status } : undefined,
+        availabilitySummary: {
+          available: availablePlayers.length,
+          unavailable: unavailablePlayers.length,
+          unsure: unsurePlayers.length,
+          lastResort: lastResortPlayers.length,
+          notSet: notSetPlayers.length,
+          total: teamRoster.length
+        },
+        availabilityDetails: {
+          available: availablePlayers,
+          unavailable: unavailablePlayers,
+          unsure: unsurePlayers,
+          lastResort: lastResortPlayers,
+          notSet: notSetPlayers
+        }
       }
     })
 
@@ -628,25 +723,11 @@ export default function HomePage() {
         .in('personal_event_id', personalActivityIds)
 
       if (allAttendees) {
-        // Count total attendees per activity (including current user)
-        // Only count attendees who haven't declined (unavailable)
-        const totalAttendeesByActivity: Record<string, number> = {}
-        allAttendees.forEach((att: any) => {
-          // Only count if not declined (unavailable)
-          if (att.availability_status !== 'unavailable') {
-            if (!totalAttendeesByActivity[att.personal_event_id]) {
-              totalAttendeesByActivity[att.personal_event_id] = 0
-            }
-            totalAttendeesByActivity[att.personal_event_id]++
-          }
-        })
-
         // Store all attendees except those who declined (unavailable) and current user
-        // Only for activities with 6 or fewer total attendees
+        // Show all attendees regardless of count
         allAttendees.forEach((att: any) => {
-          const totalCount = totalAttendeesByActivity[att.personal_event_id] || 0
-          // Include if total attendees <= 6 and status is not 'unavailable' (declined)
-          if (totalCount <= 6 && att.availability_status !== 'unavailable') {
+          // Include if status is not 'unavailable' (declined)
+          if (att.availability_status !== 'unavailable') {
             if (!allAttendeesByActivity[att.personal_event_id]) {
               allAttendeesByActivity[att.personal_event_id] = []
             }
@@ -1276,7 +1357,7 @@ export default function HomePage() {
                   const activity = item
                   const personalActivity = upcomingPersonalActivities.find(a => a.id === activity.id)
                   const otherPlayers = personalActivity?.attendees || []
-                  // Show other players if there are any (they're only loaded if total <= 6)
+                  // Show other players if there are any
                   const shouldShowPlayers = otherPlayers.length > 0
                   
                   return (
@@ -1357,6 +1438,16 @@ export default function HomePage() {
                   )
                 } else {
                   const event = item as UpcomingEvent
+                  const summary = event.availabilitySummary
+                  const details = event.availabilityDetails
+                  const expanded = expandedEventAvailability[event.id] || {
+                    available: false,
+                    unavailable: false,
+                    unsure: false,
+                    lastResort: false,
+                    notSet: false
+                  }
+                  
                   return (
                     <Link key={event.id} href={`/teams/${event.team_id}/events/${event.id}`}>
                       <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
@@ -1378,6 +1469,180 @@ export default function HomePage() {
                               {event.location && (
                                 <div className="text-xs text-muted-foreground mt-1 truncate">
                                   {event.location}
+                                </div>
+                              )}
+                              {summary && summary.total > 0 && (
+                                <div className="mt-2 space-y-1">
+                                  {summary.available > 0 && (
+                                    <div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          setExpandedEventAvailability(prev => ({
+                                            ...prev,
+                                            [event.id]: {
+                                              ...expanded,
+                                              available: !expanded.available
+                                            }
+                                          }))
+                                        }}
+                                        className="flex items-center gap-1.5 text-xs hover:bg-accent/50 rounded px-1 py-0.5 -mx-1 transition-colors w-full text-left"
+                                      >
+                                        <Check className="h-3 w-3 text-green-600" />
+                                        <span className="font-medium">{summary.available}</span>
+                                        <span className="text-muted-foreground">Available</span>
+                                        {details && details.available.length > 0 && (
+                                          <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform ml-auto", expanded.available && "rotate-180")} />
+                                        )}
+                                      </button>
+                                      {expanded.available && details && details.available.length > 0 && (
+                                        <div className="pl-5 pt-0.5 space-y-0.5">
+                                          {details.available.map((player) => (
+                                            <div key={player.id} className="text-xs text-muted-foreground">
+                                              {player.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {summary.unsure > 0 && (
+                                    <div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          setExpandedEventAvailability(prev => ({
+                                            ...prev,
+                                            [event.id]: {
+                                              ...expanded,
+                                              unsure: !expanded.unsure
+                                            }
+                                          }))
+                                        }}
+                                        className="flex items-center gap-1.5 text-xs hover:bg-accent/50 rounded px-1 py-0.5 -mx-1 transition-colors w-full text-left"
+                                      >
+                                        <HelpCircle className="h-3 w-3 text-yellow-600" />
+                                        <span className="font-medium">{summary.unsure}</span>
+                                        <span className="text-muted-foreground">Unsure</span>
+                                        {details && details.unsure.length > 0 && (
+                                          <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform ml-auto", expanded.unsure && "rotate-180")} />
+                                        )}
+                                      </button>
+                                      {expanded.unsure && details && details.unsure.length > 0 && (
+                                        <div className="pl-5 pt-0.5 space-y-0.5">
+                                          {details.unsure.map((player) => (
+                                            <div key={player.id} className="text-xs text-muted-foreground">
+                                              {player.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {summary.lastResort > 0 && (
+                                    <div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          setExpandedEventAvailability(prev => ({
+                                            ...prev,
+                                            [event.id]: {
+                                              ...expanded,
+                                              lastResort: !expanded.lastResort
+                                            }
+                                          }))
+                                        }}
+                                        className="flex items-center gap-1.5 text-xs hover:bg-accent/50 rounded px-1 py-0.5 -mx-1 transition-colors w-full text-left"
+                                      >
+                                        <HelpCircle className="h-3 w-3 text-purple-600" />
+                                        <span className="font-medium">{summary.lastResort}</span>
+                                        <span className="text-muted-foreground">Last Resort</span>
+                                        {details && details.lastResort.length > 0 && (
+                                          <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform ml-auto", expanded.lastResort && "rotate-180")} />
+                                        )}
+                                      </button>
+                                      {expanded.lastResort && details && details.lastResort.length > 0 && (
+                                        <div className="pl-5 pt-0.5 space-y-0.5">
+                                          {details.lastResort.map((player) => (
+                                            <div key={player.id} className="text-xs text-muted-foreground">
+                                              {player.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {summary.unavailable > 0 && (
+                                    <div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          setExpandedEventAvailability(prev => ({
+                                            ...prev,
+                                            [event.id]: {
+                                              ...expanded,
+                                              unavailable: !expanded.unavailable
+                                            }
+                                          }))
+                                        }}
+                                        className="flex items-center gap-1.5 text-xs hover:bg-accent/50 rounded px-1 py-0.5 -mx-1 transition-colors w-full text-left"
+                                      >
+                                        <X className="h-3 w-3 text-red-600" />
+                                        <span className="font-medium">{summary.unavailable}</span>
+                                        <span className="text-muted-foreground">Unavailable</span>
+                                        {details && details.unavailable.length > 0 && (
+                                          <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform ml-auto", expanded.unavailable && "rotate-180")} />
+                                        )}
+                                      </button>
+                                      {expanded.unavailable && details && details.unavailable.length > 0 && (
+                                        <div className="pl-5 pt-0.5 space-y-0.5">
+                                          {details.unavailable.map((player) => (
+                                            <div key={player.id} className="text-xs text-muted-foreground">
+                                              {player.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                  {summary.notSet > 0 && (
+                                    <div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.preventDefault()
+                                          e.stopPropagation()
+                                          setExpandedEventAvailability(prev => ({
+                                            ...prev,
+                                            [event.id]: {
+                                              ...expanded,
+                                              notSet: !expanded.notSet
+                                            }
+                                          }))
+                                        }}
+                                        className="flex items-center gap-1.5 text-xs hover:bg-accent/50 rounded px-1 py-0.5 -mx-1 transition-colors w-full text-left"
+                                      >
+                                        <Clock className="h-3 w-3 text-gray-600" />
+                                        <span className="font-medium">{summary.notSet}</span>
+                                        <span className="text-muted-foreground">Not Set</span>
+                                        {details && details.notSet.length > 0 && (
+                                          <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform ml-auto", expanded.notSet && "rotate-180")} />
+                                        )}
+                                      </button>
+                                      {expanded.notSet && details && details.notSet.length > 0 && (
+                                        <div className="pl-5 pt-0.5 space-y-0.5">
+                                          {details.notSet.map((player) => (
+                                            <div key={player.id} className="text-xs text-muted-foreground">
+                                              {player.name}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
