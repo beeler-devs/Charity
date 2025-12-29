@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
-import { MapPin, Loader2, Settings, Users } from 'lucide-react'
+import { MapPin, Loader2, Settings, Users, Monitor } from 'lucide-react'
 
 export default function AdminDashboardPage() {
   const router = useRouter()
@@ -47,7 +47,7 @@ export default function AdminDashboardPage() {
               Manage system-wide settings and configurations
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mt-4">
               <Link href="/admin/venues">
                 <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
                   <CardHeader>
@@ -75,6 +75,22 @@ export default function AdminDashboardPage() {
                   <CardContent>
                     <p className="text-sm text-muted-foreground">
                       View all users, edit profiles, manage system admin roles
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
+
+              <Link href="/admin/screens">
+                <Card className="hover:bg-accent transition-colors cursor-pointer h-full">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Monitor className="h-4 w-4" />
+                      All Screens
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Browse all application screens organized by main sections
                     </p>
                   </CardContent>
                 </Card>

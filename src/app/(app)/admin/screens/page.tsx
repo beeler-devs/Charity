@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Header } from '@/components/layout/header'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
-import { Loader2, Monitor, ChevronRight } from 'lucide-react'
+import { Loader2, Monitor, ChevronRight, ArrowLeft } from 'lucide-react'
 
 interface ScreenGroup {
   title: string
@@ -41,6 +42,7 @@ const screenGroups: ScreenGroup[] = [
       { name: 'Match Detail', path: '/teams/[id]/matches/[matchId]', description: 'Match details, lineup, scores' },
       { name: 'Lineup Builder', path: '/teams/[id]/matches/[matchId]/lineup', description: 'Build and publish lineups' },
       { name: 'Enter Scores', path: '/teams/[id]/matches/[matchId]/enter-scores', description: 'Enter match scores' },
+      { name: 'Match Availability', path: '/matches/[matchId]/my-availability', description: 'Set availability for a match' },
     ],
   },
   {
@@ -48,13 +50,14 @@ const screenGroups: ScreenGroup[] = [
     screens: [
       { name: 'All Events', path: '/teams/[id]/events', description: 'List of all events for a team' },
       { name: 'Event Detail', path: '/teams/[id]/events/[eventId]', description: 'Event details and attendees' },
+      { name: 'Event Availability', path: '/events/[eventId]/my-availability', description: 'Set availability for an event' },
     ],
   },
   {
     title: 'Calendar',
     screens: [
       { name: 'Calendar View', path: '/calendar', description: 'Unified calendar view' },
-      { name: 'Team Availability', path: '/calendar/team-availability', description: 'Team availability calendar' },
+      { name: 'Team Availability Calendar', path: '/calendar/team-availability', description: 'Team availability calendar' },
     ],
   },
   {
@@ -67,7 +70,42 @@ const screenGroups: ScreenGroup[] = [
   {
     title: 'Activities',
     screens: [
+      { name: 'All Activities', path: '/activities', description: 'List of personal activities' },
       { name: 'Activity Detail', path: '/activities/[eventId]', description: 'Personal activity details' },
+    ],
+  },
+  {
+    title: 'Contacts',
+    screens: [
+      { name: 'All Contacts', path: '/contacts', description: 'View and manage contacts' },
+      { name: 'Contact Detail', path: '/contacts/[id]', description: 'Contact information and details' },
+    ],
+  },
+  {
+    title: 'Messages',
+    screens: [
+      { name: 'All Messages', path: '/messages', description: 'View all conversations' },
+      { name: 'Conversation', path: '/messages/[id]', description: 'Individual conversation view' },
+    ],
+  },
+  {
+    title: 'Play',
+    screens: [
+      { name: 'Play', path: '/play', description: 'Play-related features' },
+    ],
+  },
+  {
+    title: 'Profile',
+    screens: [
+      { name: 'User Profile', path: '/profile', description: 'User profile and settings' },
+      { name: 'Other User Profile', path: '/users/[id]', description: 'View another user\'s profile' },
+    ],
+  },
+  {
+    title: 'Settings',
+    screens: [
+      { name: 'Activity Types', path: '/settings/activity-types', description: 'Manage activity types' },
+      { name: 'Availability Settings', path: '/settings/availability', description: 'Availability preferences' },
     ],
   },
   {
@@ -134,6 +172,14 @@ export default function AllScreensPage() {
       <Header title="All Screens" />
 
       <main className="flex-1 p-4 space-y-6">
+        {/* Back Button */}
+        <div className="mb-2">
+          <Button variant="ghost" onClick={() => router.push('/admin')} size="sm">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Back to Admin Dashboard
+          </Button>
+        </div>
+
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -173,19 +219,23 @@ export default function AllScreensPage() {
 
                       const isDynamicRoute = screen.path.includes('[')
                       
+                      // For dynamic routes, show info but don't make them clickable
+                      // Users can navigate manually or use the actual routes
                       return (
                         <Card
                           key={screen.path}
-                          className={`hover:bg-accent transition-colors ${isDynamicRoute ? 'opacity-75' : ''}`}
+                          className={`transition-colors ${isDynamicRoute ? 'border-dashed opacity-90' : 'hover:bg-accent cursor-pointer'}`}
                         >
                           <CardContent className="p-4">
                             {isDynamicRoute ? (
                               <div>
                                 <div className="flex items-center justify-between mb-1">
                                   <h3 className="font-medium text-sm">{screen.name}</h3>
-                                  <span className="text-xs text-muted-foreground">Dynamic</span>
+                                  <span className="text-xs px-2 py-0.5 bg-muted rounded text-muted-foreground">
+                                    Dynamic Route
+                                  </span>
                                 </div>
-                                <p className="text-xs text-muted-foreground mb-2">
+                                <p className="text-xs text-muted-foreground mb-2 font-mono">
                                   {displayPath}
                                 </p>
                                 {screen.description && (
@@ -193,16 +243,19 @@ export default function AllScreensPage() {
                                     {screen.description}
                                   </p>
                                 )}
+                                <p className="text-xs text-muted-foreground mt-2 italic">
+                                  Requires ID parameter
+                                </p>
                               </div>
                             ) : (
                               <Link href={actualPath} className="block">
                                 <div className="flex items-center justify-between mb-1">
-                                  <h3 className="font-medium text-sm hover:text-primary">
+                                  <h3 className="font-medium text-sm hover:text-primary transition-colors">
                                     {screen.name}
                                   </h3>
                                   <ChevronRight className="h-4 w-4 text-muted-foreground" />
                                 </div>
-                                <p className="text-xs text-muted-foreground mb-2">
+                                <p className="text-xs text-muted-foreground mb-2 font-mono">
                                   {displayPath}
                                 </p>
                                 {screen.description && (

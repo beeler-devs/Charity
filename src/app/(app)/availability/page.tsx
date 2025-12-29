@@ -708,7 +708,7 @@ export default function BulkAvailabilityPage() {
       case 'unavailable':
         return 'Unavailable'
       case 'maybe':
-        return 'Maybe'
+        return 'Unsure'
       case 'last_resort':
         return 'Last Resort'
       default:
@@ -868,7 +868,7 @@ export default function BulkAvailabilityPage() {
                       <SelectItem value="maybe">
                         <div className="flex items-center gap-2">
                           <HelpCircle className="h-4 w-4 text-yellow-500" />
-                          <span>Maybe</span>
+                          <span>Unsure</span>
                         </div>
                       </SelectItem>
                       <SelectItem value="last_resort">
@@ -1040,7 +1040,7 @@ export default function BulkAvailabilityPage() {
                           <SelectItem value="maybe">
                             <div className="flex items-center gap-2">
                               <HelpCircle className="h-4 w-4 text-yellow-500" />
-                              <span>Maybe</span>
+                              <span>Unsure</span>
                             </div>
                           </SelectItem>
                           <SelectItem value="last_resort">

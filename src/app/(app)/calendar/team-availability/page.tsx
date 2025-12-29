@@ -540,7 +540,7 @@ function TeamAvailabilityContent() {
       case 'unavailable':
         return 'Unavailable'
       case 'maybe':
-        return 'Maybe'
+        return 'Unsure'
       case 'last_resort':
         return 'Last Resort'
       default:
@@ -791,7 +791,7 @@ function TeamAvailabilityContent() {
                           )}
                           onClick={() => updateAvailability(event.id, 'maybe')}
                           disabled={saving[event.id]}
-                          title="Maybe"
+                          title="Unsure"
                         >
                           <HelpCircle className="h-4 w-4" />
                         </Button>

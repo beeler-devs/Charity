@@ -220,6 +220,9 @@ export default function HomePage() {
       .select('id, name, league_format, season')
       .or(`captain_id.eq.${effectiveUserId},co_captain_id.eq.${effectiveUserId}`)
 
+    // Create a set of team IDs where user is captain (for lineup filtering)
+    const captainTeamIds = new Set(captainTeams?.map(t => t.id) || [])
+
     // Combine and deduplicate teams
     const membershipTeams: Team[] = []
     memberships?.forEach(m => {
@@ -334,7 +337,9 @@ export default function HomePage() {
     
     setTeamMatchTypes(teamMatchTypes)
 
-    const { data: lineups } = await supabase
+    // Use the captainTeamIds set we already created above (captain status is constant per season)
+    // Load lineups - captains see all, players only see published
+    let lineupsQuery = supabase
       .from('lineups')
       .select(`
         id,
@@ -354,8 +359,21 @@ export default function HomePage() {
         )
       `)
       .in('match_id', matchIds)
-      .eq('is_published', true)
-      .order('court_slot', { ascending: true })
+    
+    // If user is not a captain for any team, filter to only published lineups
+    if (captainTeamIds.size === 0) {
+      lineupsQuery = lineupsQuery.eq('is_published', true)
+    }
+    
+    const { data: lineups } = await lineupsQuery.order('court_slot', { ascending: true })
+    
+    // Filter lineups: captains see all, players only see published
+    const filteredLineups = lineups?.filter(lineup => {
+      const match = Array.isArray(lineup.matches) ? lineup.matches[0] : lineup.matches
+      const lineupTeamId = match?.team_id
+      // If user is captain for this team, show all lineups; otherwise only published
+      return captainTeamIds.has(lineupTeamId) || lineup.is_published
+    }) || []
 
     // Group lineups by match_id
     const lineupsByMatch: Record<string, Array<{
@@ -365,8 +383,8 @@ export default function HomePage() {
       player2: { id: string; full_name: string } | null
     }>> = {}
     
-    if (lineups) {
-      lineups.forEach((lineup: any) => {
+    if (filteredLineups) {
+      filteredLineups.forEach((lineup: any) => {
         if (!lineupsByMatch[lineup.match_id]) {
           lineupsByMatch[lineup.match_id] = []
         }
@@ -390,6 +408,11 @@ export default function HomePage() {
           player1: player1 ? { id: player1.id, full_name: player1.full_name } : null,
           player2: isSingles ? null : (player2 ? { id: player2.id, full_name: player2.full_name } : null),
         })
+      })
+      
+      // Sort lineups by court_slot to ensure proper ordering
+      Object.keys(lineupsByMatch).forEach(matchId => {
+        lineupsByMatch[matchId].sort((a, b) => a.court_slot - b.court_slot)
       })
     }
     
@@ -1067,9 +1090,14 @@ export default function HomePage() {
                 })()}
                 size="sm"
                 onClick={() => {
-                  // "All" means select all event types
                   const allTypes = ['match', 'practice', 'warmup', 'social', 'other']
-                  setSelectedEventTypes(allTypes)
+                  if (selectedEventTypes.length === allTypes.length) {
+                    // If all selected, deselect all
+                    setSelectedEventTypes([])
+                  } else {
+                    // Otherwise, select all
+                    setSelectedEventTypes(allTypes)
+                  }
                 }}
               >
                 All
@@ -1227,7 +1255,7 @@ export default function HomePage() {
                               <SelectItem value="maybe">
                                 <div className="flex items-center gap-2">
                                   <HelpCircle className="h-3 w-3 text-yellow-500" />
-                                  <span>Maybe</span>
+                                  <span>Unsure</span>
                                 </div>
                               </SelectItem>
                               <SelectItem value="unavailable">
@@ -1294,7 +1322,7 @@ export default function HomePage() {
                                       <div className="flex items-center gap-1.5">
                                         {getAvailabilityIcon(personalActivity.availability_status)}
                                         <span className="capitalize">
-                                          {personalActivity.availability_status === 'maybe' ? 'Tentative' : personalActivity.availability_status}
+                                          {personalActivity.availability_status === 'maybe' ? 'Unsure' : personalActivity.availability_status}
                                         </span>
                                       </div>
                                     </SelectValue>
@@ -1309,7 +1337,7 @@ export default function HomePage() {
                                     <SelectItem value="maybe">
                                       <div className="flex items-center gap-2">
                                         <HelpCircle className="h-3 w-3 text-yellow-500" />
-                                        <span>Tentative</span>
+                                        <span>Unsure</span>
                                       </div>
                                     </SelectItem>
                                     <SelectItem value="unavailable">

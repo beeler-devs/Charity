@@ -1178,7 +1178,7 @@ export default function CalendarPage() {
                       <SelectItem value="maybe">
                         <div className="flex items-center gap-2">
                           <HelpCircle className="h-4 w-4 text-yellow-500" />
-                          <span>Maybe</span>
+                          <span>Unsure</span>
                         </div>
                       </SelectItem>
                       <SelectItem value="unavailable">

@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { Check, X, HelpCircle, Clock, ChevronDown, ArrowLeft, Save, Filter, Users, Trash2, X as XIcon, Eraser, CheckCircle2 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -73,6 +74,7 @@ interface AvailabilityData {
     last_resort: number
     maybe: number
     unavailable: number
+    notSet: number
     total: number 
   }>
 }
@@ -99,6 +101,7 @@ export default function AvailabilityPage() {
   const [teamName, setTeamName] = useState<string>('')
   const [teamColor, setTeamColor] = useState<string | null>(null)
   const [selectedEventTypes, setSelectedEventTypes] = useState<string[]>(['match', 'practice', 'warmup', 'other']) // Default to all
+  const [hidePastEvents, setHidePastEvents] = useState(false)
   const [openPopovers, setOpenPopovers] = useState<Record<string, boolean>>({})
   const [pendingChanges, setPendingChanges] = useState<Record<string, Record<string, 'available' | 'unavailable' | 'maybe' | 'last_resort' | 'clear'>>>({})
   const [bulkAvailabilityDialog, setBulkAvailabilityDialog] = useState<{
@@ -425,7 +428,7 @@ export default function AvailabilityPage() {
 
     // Calculate availability counts per match
     // Count how many players are available vs. how many are needed to fill the courts
-    const availabilityCounts: Record<string, { available: number; total: number }> = {}
+    const availabilityCounts: Record<string, { available: number; last_resort: number; maybe: number; unavailable: number; notSet: number; total: number }> = {}
     
     // Calculate players needed based on team configuration
     // For each line, determine if it's doubles (2 players) or singles (1 player)
@@ -447,6 +450,7 @@ export default function AvailabilityPage() {
       let lastResort = 0
       let maybe = 0
       let unavailable = 0
+      let notSet = 0
       
       // Count players by status
       playerIds.forEach(playerId => {
@@ -466,6 +470,9 @@ export default function AvailabilityPage() {
               unavailable++
               break
           }
+        } else {
+          // Player has not set availability
+          notSet++
         }
       })
       
@@ -481,14 +488,17 @@ export default function AvailabilityPage() {
         last_resort: lastResort,
         maybe,
         unavailable,
+        notSet,
         total: totalNeeded 
       }
     })
 
     // Calculate player stats (including availability count)
+    // Note: availabilityCount and totalMatches will be recalculated based on filters in the render
     const playersWithStats = players.map(player => {
       const stats = statsMap.get(player.id) || { matchesPlayed: 0, matchesWon: 0, matchesLost: 0 }
       const playerAvailabilities = availability[player.id] || {}
+      // Count all available statuses (will be filtered by displayed items in render)
       const availabilityCount = Object.values(playerAvailabilities).filter(a => a.status === 'available').length
       
       return {
@@ -653,15 +663,27 @@ export default function AvailabilityPage() {
   }
 
   function getDisplayedItems(): CalendarItem[] {
+    const today = new Date().toISOString().split('T')[0]
+    
     return data.items.filter(item => {
+      // Filter by event type
+      let matchesType = false
       if (item.type === 'match') {
-        return selectedEventTypes.includes('match')
+        matchesType = selectedEventTypes.includes('match')
       } else {
         // For events, check the event_type field
         const eventType = item.event_type || 'other'
-        // Return true if this event type is selected, or if 'all' is selected
-        return selectedEventTypes.includes(eventType)
+        matchesType = selectedEventTypes.includes(eventType)
       }
+      
+      if (!matchesType) return false
+      
+      // Filter out past events if hidePastEvents is enabled
+      if (hidePastEvents && item.date < today) {
+        return false
+      }
+      
+      return true
     })
   }
 
@@ -1246,7 +1268,7 @@ export default function AvailabilityPage() {
       case 'unavailable':
         return 'Unavailable'
       case 'maybe':
-        return 'Maybe'
+        return 'Unsure'
       case 'last_resort':
         return 'Last Resort'
       default:
@@ -1409,6 +1431,16 @@ export default function AvailabilityPage() {
                   </Button>
                 ))}
               </div>
+              <div className="flex items-center gap-2 ml-4 pl-4 border-l">
+                <Checkbox
+                  id="hide-past-events"
+                  checked={hidePastEvents}
+                  onCheckedChange={(checked) => setHidePastEvents(checked === true)}
+                />
+                <Label htmlFor="hide-past-events" className="text-sm font-normal cursor-pointer">
+                  Hide past events
+                </Label>
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1528,6 +1560,7 @@ export default function AvailabilityPage() {
                       last_resort: 0,
                       maybe: 0,
                       unavailable: 0,
+                      notSet: 0,
                       total: data.players.length 
                     }
                     
@@ -1536,6 +1569,7 @@ export default function AvailabilityPage() {
                     let lastResortCount = baseCount.last_resort
                     let maybeCount = baseCount.maybe
                     let unavailableCount = baseCount.unavailable
+                    let notSetCount = baseCount.notSet
                     
                     data.players.forEach(player => {
                       const pendingStatus = pendingChanges[player.id]?.[item.id]
@@ -1547,12 +1581,14 @@ export default function AvailabilityPage() {
                         else if (savedStatus === 'last_resort') lastResortCount--
                         else if (savedStatus === 'maybe') maybeCount--
                         else if (savedStatus === 'unavailable') unavailableCount--
+                        else if (!savedStatus) notSetCount-- // Was not set
                         
                         // Add new status to count (unless it's 'clear')
                         if (pendingStatus === 'available') availableCount++
                         else if (pendingStatus === 'last_resort') lastResortCount++
                         else if (pendingStatus === 'maybe') maybeCount++
                         else if (pendingStatus === 'unavailable') unavailableCount++
+                        else if (pendingStatus === 'clear') notSetCount++ // Clearing sets it to not set
                       }
                     })
                     
@@ -1611,6 +1647,9 @@ export default function AvailabilityPage() {
                             )}
                             {unavailableCount > 0 && (
                               <div className="text-red-600">Not Available: {unavailableCount}</div>
+                            )}
+                            {notSetCount > 0 && (
+                              <div className="text-gray-600">Not Set: {notSetCount}</div>
                             )}
                           </div>
                         </div>
@@ -1694,7 +1733,20 @@ export default function AvailabilityPage() {
                     {/* History column */}
                     <td className="p-2 text-center text-xs border-r">
                       <div className="space-y-0.5">
-                        <div>- Avail {player.stats.availabilityCount} of {getDisplayedItems().length}</div>
+                        {(() => {
+                          // Calculate availability count based only on displayed (filtered) items
+                          const displayedItems = getDisplayedItems()
+                          const displayedItemIds = new Set(displayedItems.map(item => item.id))
+                          const playerAvailabilities = data.availability[player.id] || {}
+                          // Count only availability for displayed items that are 'available'
+                          const filteredAvailabilityCount = Object.entries(playerAvailabilities)
+                            .filter(([itemId]) => displayedItemIds.has(itemId))
+                            .filter(([, avail]) => avail.status === 'available').length
+                          
+                          return (
+                            <div>- Avail {filteredAvailabilityCount} of {displayedItems.length}</div>
+                          )
+                        })()}
                       </div>
                     </td>
                     
@@ -1780,7 +1832,7 @@ export default function AvailabilityPage() {
                                     onClick={() => updateAvailabilityLocal(player.id, item.id, 'maybe')}
                                   >
                                     <HelpCircle className="h-4 w-4 mr-2 text-yellow-500" />
-                                    Maybe
+                                    Unsure
                                   </Button>
                                   <Button
                                     variant="ghost"

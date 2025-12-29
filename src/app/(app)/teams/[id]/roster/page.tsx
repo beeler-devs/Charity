@@ -38,6 +38,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useToast } from '@/hooks/use-toast'
+import { useIsCaptain, triggerRosterChange } from '@/hooks/use-is-captain'
 
 export default function RosterPage() {
   const params = useParams()
@@ -45,7 +46,7 @@ export default function RosterPage() {
   const teamId = params.id as string
   const [roster, setRoster] = useState<RosterMember[]>([])
   const [loading, setLoading] = useState(true)
-  const [isCaptain, setIsCaptain] = useState(false)
+  const { isCaptain } = useIsCaptain(teamId)
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showEditDialog, setShowEditDialog] = useState(false)
@@ -58,10 +59,9 @@ export default function RosterPage() {
 
   useEffect(() => {
     loadRoster()
-    checkCaptainStatus()
   }, [teamId])
 
-  async function loadRoster() {
+async function loadRoster() {
     const supabase = createClient()
 
     // Load team name
@@ -89,27 +89,6 @@ export default function RosterPage() {
     setLoading(false)
   }
 
-  async function checkCaptainStatus() {
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      setIsCaptain(false)
-      return
-    }
-
-    const { data: teamData } = await supabase
-      .from('teams')
-      .select('captain_id, co_captain_id')
-      .eq('id', teamId)
-      .single()
-
-    if (teamData && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
-      setIsCaptain(true)
-    } else {
-      setIsCaptain(false)
-    }
-  }
 
   async function handleDeletePlayer() {
     if (!playerToDelete) return
@@ -162,6 +141,8 @@ export default function RosterPage() {
         description: `${playerToDelete.full_name} has been removed from the roster`,
       })
       loadRoster()
+      // Trigger roster change event to refresh captain status on other pages
+      triggerRosterChange(teamId)
     }
 
     setShowDeleteAlert(false)
@@ -347,6 +328,8 @@ export default function RosterPage() {
         onAdded={() => {
           setShowAddDialog(false)
           loadRoster()
+          // Trigger roster change event to refresh captain status on other pages
+          triggerRosterChange(teamId)
         }}
       />
 
@@ -357,6 +340,8 @@ export default function RosterPage() {
         onImported={() => {
           setShowImportDialog(false)
           loadRoster()
+          // Trigger roster change event to refresh captain status on other pages
+          triggerRosterChange(teamId)
         }}
       />
 
@@ -369,6 +354,8 @@ export default function RosterPage() {
           setShowEditDialog(false)
           setEditingPlayer(null)
           loadRoster()
+          // Trigger roster change event to refresh captain status on other pages
+          triggerRosterChange(teamId)
         }}
       />
 
@@ -377,7 +364,11 @@ export default function RosterPage() {
         onOpenChange={setShowInviteDialog}
         teamId={teamId}
         teamName={teamName}
-        onInvited={loadRoster}
+        onInvited={() => {
+          loadRoster()
+          // Trigger roster change event to refresh captain status on other pages
+          triggerRosterChange(teamId)
+        }}
       />
 
       <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>

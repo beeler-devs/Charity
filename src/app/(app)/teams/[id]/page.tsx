@@ -151,6 +151,7 @@ export default function TeamDetailPage() {
       .eq('id', teamId)
       .single()
 
+    let isUserCaptain = false
     if (teamData) {
       setTeam(teamData)
       
@@ -175,7 +176,8 @@ export default function TeamDetailPage() {
       setLineMatchTypes(matchTypes)
       
       // Check if current user is captain
-      if (user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
+      isUserCaptain = user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)
+      if (isUserCaptain) {
         setIsCaptain(true)
         
         // Load pending invitations count for captains
@@ -222,7 +224,10 @@ export default function TeamDetailPage() {
       // Load lineups for all matches
       const matchIds = matchData.map(m => m.id)
       if (matchIds.length > 0) {
-        const { data: lineupsData } = await supabase
+        // Use the isUserCaptain value we determined above
+        
+        // Load lineups - captains see all, players only see published
+        let lineupsQuery = supabase
           .from('lineups')
           .select(`
             id,
@@ -232,6 +237,13 @@ export default function TeamDetailPage() {
             player2:roster_members!lineups_player2_id_fkey(full_name)
           `)
           .in('match_id', matchIds)
+        
+        // If user is not a captain, filter to only published lineups
+        if (!isUserCaptain) {
+          lineupsQuery = lineupsQuery.eq('is_published', true)
+        }
+        
+        const { data: lineupsData } = await lineupsQuery
           .order('match_id')
           .order('court_slot', { ascending: true })
 
@@ -713,7 +725,7 @@ export default function TeamDetailPage() {
                           const statusConfig = {
                             available: { icon: Check, label: 'Available', color: 'text-green-500' },
                             unavailable: { icon: X, label: 'Unavailable', color: 'text-red-500' },
-                            maybe: { icon: HelpCircle, label: 'Maybe', color: 'text-yellow-500' },
+                            maybe: { icon: HelpCircle, label: 'Unsure', color: 'text-yellow-500' },
                             last_resort: { icon: HelpCircle, label: 'Last Resort', color: 'text-purple-500' },
                           }
                           const config = statusConfig[status as keyof typeof statusConfig] || statusConfig.unavailable

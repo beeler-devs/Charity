@@ -134,6 +134,7 @@ export default function MatchDetailPage() {
   const [showWarmupVenueDialog, setShowWarmupVenueDialog] = useState(false)
   const [teamFacilityName, setTeamFacilityName] = useState<string | null>(null)
   const [teamFacilityAddress, setTeamFacilityAddress] = useState<string | null>(null)
+  const [lineMatchTypes, setLineMatchTypes] = useState<string[]>([])
   const [checklist, setChecklist] = useState<ChecklistItem[]>([
     { days: 14, task: 'Order balls', completed: false },
     { days: 10, task: 'Email opponent captain', completed: false },
@@ -287,14 +288,16 @@ export default function MatchDetailPage() {
       }
       
       // Check if current user is captain or co-captain
-      if (user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)) {
+      const isUserCaptain = user && (teamData.captain_id === user.id || teamData.co_captain_id === user.id)
+      if (isUserCaptain) {
         setIsCaptain(true)
       }
+      
+      // Load court-by-court scores if available (pass captain status)
+      await loadCourtScores(isUserCaptain || false)
+      await loadLineups(isUserCaptain || false)
     }
 
-    // Load court-by-court scores if available
-    await loadCourtScores()
-    await loadLineups()
     await loadAvailabilitySummary()
     // Warmup venues will be loaded after warmupCourt is set
 
@@ -306,11 +309,11 @@ export default function MatchDetailPage() {
     }
   }
 
-  async function loadLineups() {
+  async function loadLineups(isUserCaptain: boolean = false) {
     const supabase = createClient()
     
-    // Get all lineups for this match (published and unpublished)
-    const { data: lineupsData } = await supabase
+    // Load lineups - captains see all, players only see published
+    let lineupsQuery = supabase
       .from('lineups')
       .select(`
         id,
@@ -319,7 +322,13 @@ export default function MatchDetailPage() {
         player2:roster_members!lineups_player2_id_fkey(full_name)
       `)
       .eq('match_id', matchId)
-      .order('court_slot', { ascending: true })
+    
+    // If user is not a captain, filter to only published lineups
+    if (!isUserCaptain) {
+      lineupsQuery = lineupsQuery.eq('is_published', true)
+    }
+    
+    const { data: lineupsData } = await lineupsQuery.order('court_slot', { ascending: true })
 
     if (lineupsData) {
       setLineups(lineupsData)
@@ -407,11 +416,11 @@ export default function MatchDetailPage() {
     })
   }
 
-  async function loadCourtScores() {
+  async function loadCourtScores(isUserCaptain: boolean = false) {
     const supabase = createClient()
-
-    // Get lineups for this match
-    const { data: lineups } = await supabase
+    
+    // Load lineups - captains see all, players only see published
+    let lineupsQuery = supabase
       .from('lineups')
       .select(`
         id,
@@ -420,8 +429,13 @@ export default function MatchDetailPage() {
         player2:roster_members!lineups_player2_id_fkey(full_name)
       `)
       .eq('match_id', matchId)
-      .eq('is_published', true)
-      .order('court_slot', { ascending: true })
+    
+    // If user is not a captain, filter to only published lineups
+    if (!isUserCaptain) {
+      lineupsQuery = lineupsQuery.eq('is_published', true)
+    }
+    
+    const { data: lineups } = await lineupsQuery.order('court_slot', { ascending: true })
 
     if (!lineups || lineups.length === 0) return
 
