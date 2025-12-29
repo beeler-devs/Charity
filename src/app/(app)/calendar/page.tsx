@@ -919,17 +919,29 @@ export default function CalendarPage() {
               </Button>
 
               {canAddEvents && (
-                <>
-                  <Button
-                    size="sm"
-                    onClick={handleAddEvent}
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    Add Event
-                  </Button>
-                  <span className="text-xs text-muted-foreground">Practice, scrimmage, social</span>
-                </>
+                <Button
+                  size="sm"
+                  onClick={handleAddEvent}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add Event
+                </Button>
               )}
+
+              <Tabs value={viewMode} onValueChange={(v) => {
+                const newMode = v as ViewMode
+                setViewMode(newMode)
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('calendar-view-mode', newMode)
+                }
+              }} className="flex-1">
+                <TabsList className="inline-flex gap-0 w-auto p-0.5 h-8">
+                  <TabsTrigger value="week" className="px-2 text-xs h-7 w-auto data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:font-semibold">Week</TabsTrigger>
+                  <TabsTrigger value="month" className="px-2 text-xs h-7 w-auto data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:font-semibold">Month</TabsTrigger>
+                  <TabsTrigger value="list" className="px-2 text-xs h-7 w-auto data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:font-semibold">List</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
               <Button
                 variant={bulkSelectMode ? "default" : "outline"}
                 size="sm"
@@ -952,20 +964,6 @@ export default function CalendarPage() {
                   </>
                 )}
               </Button>
-
-              <Tabs value={viewMode} onValueChange={(v) => {
-                const newMode = v as ViewMode
-                setViewMode(newMode)
-                if (typeof window !== 'undefined') {
-                  localStorage.setItem('calendar-view-mode', newMode)
-                }
-              }} className="flex-1">
-                <TabsList className="inline-flex gap-0 w-auto p-0.5 h-8">
-                  <TabsTrigger value="week" className="px-2 text-xs h-7 w-auto data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:font-semibold">Week</TabsTrigger>
-                  <TabsTrigger value="month" className="px-2 text-xs h-7 w-auto data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:font-semibold">Month</TabsTrigger>
-                  <TabsTrigger value="list" className="px-2 text-xs h-7 w-auto data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:font-semibold">List</TabsTrigger>
-                </TabsList>
-              </Tabs>
             </div>
             
             {/* Weeks filter - only shown in week view, right under Week tab */}
