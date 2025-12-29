@@ -722,7 +722,18 @@ function TeamAvailabilityContent() {
                     <div className="flex-1 min-w-0 flex items-center gap-2">
                       {/* Badge */}
                       {event.type === 'match' ? (
-                        <Badge className="bg-emerald-700 text-white text-xs shrink-0">M</Badge>
+                        <Badge 
+                          variant="default" 
+                          className="bg-blue-900 text-white text-[10px] px-1 py-0 h-4 shrink-0"
+                        >
+                          Match {event.is_home !== undefined && (
+                            event.is_home ? (
+                              <span className="ml-1 bg-teal-500 text-white px-1 rounded">(H)</span>
+                            ) : (
+                              <span className="ml-1 bg-orange-500 text-white px-1 rounded">(A)</span>
+                            )
+                          )}
+                        </Badge>
                       ) : event.event_type && (
                         <div className="shrink-0">
                           <EventTypeBadge eventType={event.event_type} />
