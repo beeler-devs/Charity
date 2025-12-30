@@ -1205,15 +1205,27 @@ function CalendarPageContent() {
                 Today
               </Button>
 
-              {canAddEvents && (
-                <Button
-                  size="sm"
-                  onClick={handleAddEvent}
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Event
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {(eventViewType === 'all' || eventViewType === 'personal') && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setShowCreateActivityDialog(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Create Activity
+                  </Button>
+                )}
+                {canAddEvents && (
+                  <Button
+                    size="sm"
+                    onClick={handleAddEvent}
+                  >
+                    <Plus className="h-4 w-4 mr-1" />
+                    Add Event
+                  </Button>
+                )}
+              </div>
 
               <Tabs value={viewMode} onValueChange={(v) => {
                 const newMode = v as ViewMode

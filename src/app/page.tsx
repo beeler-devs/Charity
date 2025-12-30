@@ -33,7 +33,7 @@ export default function LandingPage() {
     // Check if user is already logged in
     const checkAuth = async () => {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
   if (user) {
         router.push('/home')
       }

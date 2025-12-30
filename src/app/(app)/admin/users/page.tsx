@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useToast } from '@/hooks/use-toast'
 import { useIsSystemAdmin } from '@/hooks/use-is-system-admin'
-import { Plus, Edit, Trash2, Users, Loader2, Search, Shield, LogIn } from 'lucide-react'
+import { Plus, Edit, Trash2, Users, Loader2, Search, Shield, LogIn, AlertCircle } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -39,6 +39,8 @@ export default function AdminUsersPage() {
   const [showUserDialog, setShowUserDialog] = useState(false)
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
+  const [orphanedCount, setOrphanedCount] = useState<number | null>(null)
+  const [fixingOrphaned, setFixingOrphaned] = useState(false)
   const { toast } = useToast()
 
   useEffect(() => {
@@ -53,6 +55,7 @@ export default function AdminUsersPage() {
         return
       }
       loadUsers()
+      checkOrphanedUsers()
     }
   }, [isAdmin, adminLoading, router, toast])
 
@@ -125,6 +128,56 @@ export default function AdminUsersPage() {
     }
 
     setLoading(false)
+  }
+
+  async function checkOrphanedUsers() {
+    try {
+      const response = await fetch('/api/admin/users/fix-orphaned')
+      if (response.ok) {
+        const data = await response.json()
+        setOrphanedCount(data.orphanedCount || 0)
+      }
+    } catch (error) {
+      console.error('Error checking orphaned users:', error)
+    }
+  }
+
+  async function fixOrphanedUsers() {
+    setFixingOrphaned(true)
+    try {
+      const response = await fetch('/api/admin/users/fix-orphaned', {
+        method: 'POST',
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        toast({
+          title: 'Error',
+          description: data.error || 'Failed to fix orphaned users',
+          variant: 'destructive',
+        })
+        return
+      }
+
+      toast({
+        title: 'Orphaned Users Fixed',
+        description: data.message || `Fixed ${data.fixed} orphaned user(s)`,
+      })
+
+      // Reload users and check count again
+      await loadUsers()
+      await checkOrphanedUsers()
+    } catch (error) {
+      console.error('Error fixing orphaned users:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to fix orphaned users',
+        variant: 'destructive',
+      })
+    } finally {
+      setFixingOrphaned(false)
+    }
   }
 
   async function handleImpersonateUser(user: UserProfile) {
@@ -267,15 +320,37 @@ export default function AdminUsersPage() {
                 <Users className="h-5 w-5" />
                 Manage Users
               </CardTitle>
-              <Button
-                onClick={() => {
-                  setEditingUser(null)
-                  setShowUserDialog(true)
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add User
-              </Button>
+              <div className="flex items-center gap-2">
+                {orphanedCount !== null && orphanedCount > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={fixOrphanedUsers}
+                    disabled={fixingOrphaned}
+                    className="text-orange-600 border-orange-600 hover:bg-orange-50"
+                  >
+                    {fixingOrphaned ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Fixing...
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 mr-2" />
+                        Fix {orphanedCount} Orphaned User{orphanedCount !== 1 ? 's' : ''}
+                      </>
+                    )}
+                  </Button>
+                )}
+                <Button
+                  onClick={() => {
+                    setEditingUser(null)
+                    setShowUserDialog(true)
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Add User
+                </Button>
+              </div>
             </div>
           </CardHeader>
           <CardContent className="p-4 pt-2 space-y-4">

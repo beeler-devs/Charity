@@ -121,17 +121,10 @@ export function UserDialog({
             variant: 'destructive',
           })
         } else {
-          if (data.requiresAdminAPI && password.trim()) {
-            toast({
-              title: 'Profile updated',
-              description: 'Profile updated. Password updates require Admin API access.',
-            })
-          } else {
-            toast({
-              title: 'User updated',
-              description: 'The user has been updated successfully',
-            })
-          }
+          toast({
+            title: 'User updated',
+            description: data.message || 'The user has been updated successfully',
+          })
           onSaved()
           onOpenChange(false)
         }
@@ -155,11 +148,28 @@ export function UserDialog({
         const data = await response.json()
 
         if (!response.ok) {
-          if (data.requiresAdminAPI) {
+          if (response.status === 409) {
+            // User already exists
+            toast({
+              title: 'User Already Exists',
+              description: 'A user with this email already exists. If they don\'t appear in the users list, they may need to sign in to create their profile. Use "Forgot Password" if they don\'t know their password.',
+              variant: 'destructive',
+              duration: 10000,
+            })
+          } else if (data.requiresAdminAPI) {
+            const instructions = data.instructions ? '\n\n' + data.instructions.join('\n') : ''
             toast({
               title: 'Admin API Required',
-              description: 'Creating users requires Supabase Admin API. Please use the Supabase Dashboard to create users, or implement Admin API integration.',
+              description: 'Creating users requires Supabase Admin API. If the user already exists in auth.users but not in profiles, have them sign in (use password reset if needed) to automatically create their profile.' + instructions,
               variant: 'destructive',
+              duration: 15000,
+            })
+          } else if (data.error?.includes('already exists') || data.error?.includes('User already registered')) {
+            toast({
+              title: 'User Already Exists',
+              description: 'This user already exists in the system. If they don\'t appear in the users list, they may need to sign in to create their profile. Use "Forgot Password" if they don\'t know their password.',
+              variant: 'destructive',
+              duration: 10000,
             })
           } else {
             toast({

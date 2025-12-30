@@ -397,22 +397,94 @@ export default function AvailabilityPage() {
 
     // Load availability for all player/match and player/event combinations
     // This should load ALL availability for ALL roster members - RLS policies should allow team members to see all team availability
-    const { data: availabilityData, error: availabilityError } = await supabase
-      .from('availability')
-      .select('*')
-      .in('roster_member_id', playerIds)
-      .or(`match_id.in.(${matchIds.join(',')}),event_id.in.(${eventIds.join(',')})`)
+    // For co-captains, RLS policy should allow viewing even if they're not roster members
+    let availabilityData: any[] | null = null
+    let availabilityError: any = null
+    
+    // Try loading availability - for captains/co-captains, RLS should allow viewing all team availability
+    // For regular players, they can only see availability for their team's matches/events
+    if (matchIds.length > 0 || eventIds.length > 0) {
+      let availabilityQuery = supabase
+        .from('availability')
+        .select('*')
+      
+      // Filter by roster members if we have player IDs
+      if (playerIds.length > 0) {
+        availabilityQuery = availabilityQuery.in('roster_member_id', playerIds)
+      }
+      
+      // Build the OR clause for matches and events
+      if (matchIds.length > 0 && eventIds.length > 0) {
+        availabilityQuery = availabilityQuery.or(`match_id.in.(${matchIds.join(',')}),event_id.in.(${eventIds.join(',')})`)
+      } else if (matchIds.length > 0) {
+        availabilityQuery = availabilityQuery.in('match_id', matchIds)
+      } else if (eventIds.length > 0) {
+        availabilityQuery = availabilityQuery.in('event_id', eventIds)
+      }
+      
+      const result = await availabilityQuery
+      availabilityData = result.data
+      availabilityError = result.error
+      
+      // If query failed and user is captain/co-captain, try a simpler query that relies on RLS
+      if (availabilityError && isUserCaptain) {
+        console.warn('Initial availability query failed for captain/co-captain, trying fallback query...')
+        let fallbackQuery = supabase
+          .from('availability')
+          .select('*')
+        
+        // For captains/co-captains, RLS should allow viewing all team availability
+        // So we can query by match/event IDs and let RLS filter
+        if (matchIds.length > 0 && eventIds.length > 0) {
+          fallbackQuery = fallbackQuery.or(`match_id.in.(${matchIds.join(',')}),event_id.in.(${eventIds.join(',')})`)
+        } else if (matchIds.length > 0) {
+          fallbackQuery = fallbackQuery.in('match_id', matchIds)
+        } else if (eventIds.length > 0) {
+          fallbackQuery = fallbackQuery.in('event_id', eventIds)
+        }
+        
+        const fallbackResult = await fallbackQuery
+        if (!fallbackResult.error) {
+          // Filter to only roster members manually since we're bypassing that filter
+          availabilityData = fallbackResult.data?.filter((a: any) => playerIds.includes(a.roster_member_id)) || null
+          availabilityError = null
+          console.log('Fallback query succeeded, filtered to roster members')
+        } else {
+          availabilityError = fallbackResult.error
+        }
+      }
+    }
     
     if (availabilityError) {
       console.error('Error loading availability:', availabilityError)
+      console.error('Error details:', {
+        message: availabilityError.message,
+        details: availabilityError.details,
+        hint: availabilityError.hint,
+        code: availabilityError.code,
+        isCaptain: isUserCaptain,
+        userId: user.id,
+        teamId: targetTeamId,
+        playerIdsCount: playerIds.length,
+        matchIdsCount: matchIds.length,
+        eventIdsCount: eventIds.length,
+      })
       toast({
         title: 'Warning',
-        description: 'Some availability data may not be visible due to permissions',
+        description: `Some availability data may not be visible due to permissions. Error: ${availabilityError.message}`,
         variant: 'default',
       })
     }
     
-    console.log(`Loaded ${availabilityData?.length || 0} availability records for ${playerIds.length} players`)
+    console.log(`Loaded ${availabilityData?.length || 0} availability records for ${playerIds.length} players`, {
+      isCaptain: isUserCaptain,
+      userId: user.id,
+      teamId: targetTeamId,
+      playerIdsCount: playerIds.length,
+      matchIdsCount: matchIds.length,
+      eventIdsCount: eventIds.length,
+      hasAvailabilityData: !!availabilityData,
+    })
 
     // Build availability lookup (for both matches and events)
     const availability: Record<string, Record<string, Availability>> = {}

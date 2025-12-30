@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import { isCurrentUserSystemAdmin } from '@/lib/admin-utils'
 
 /**
@@ -8,7 +9,7 @@ import { isCurrentUserSystemAdmin } from '@/lib/admin-utils'
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { userId: string } }
+  { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
     const supabase = await createClient()
@@ -22,7 +23,42 @@ export async function PUT(
       )
     }
 
+    const resolvedParams = await params
+    const userId = resolvedParams.userId
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
     const { email, fullName, phone, ntrpRating, isSystemAdmin, password } = await request.json()
+
+    // Use admin client for password updates
+    const adminClient = createAdminClient()
+
+    // Update password if provided (requires Admin API)
+    if (password && password.trim()) {
+      try {
+        const { error: passwordError } = await adminClient.auth.admin.updateUserById(
+          userId,
+          { password: password.trim() }
+        )
+
+        if (passwordError) {
+          return NextResponse.json(
+            { error: `Failed to update password: ${passwordError.message}` },
+            { status: 500 }
+          )
+        }
+      } catch (error: any) {
+        return NextResponse.json(
+          { error: `Failed to update password: ${error.message}` },
+          { status: 500 }
+        )
+      }
+    }
 
     // Update profile
     const updateData: any = {}
@@ -31,10 +67,36 @@ export async function PUT(
     if (ntrpRating !== undefined) updateData.ntrp_rating = ntrpRating ? parseFloat(ntrpRating) : null
     if (isSystemAdmin !== undefined) updateData.is_system_admin = isSystemAdmin
 
-    const { error: profileError } = await supabase
+    // Update email if provided (requires Admin API)
+    if (email !== undefined && email.trim()) {
+      try {
+        const { error: emailError } = await adminClient.auth.admin.updateUserById(
+          userId,
+          { email: email.trim().toLowerCase() }
+        )
+
+        if (emailError) {
+          return NextResponse.json(
+            { error: `Failed to update email: ${emailError.message}` },
+            { status: 500 }
+          )
+        }
+
+        // Also update email in profile
+        updateData.email = email.trim().toLowerCase()
+      } catch (error: any) {
+        return NextResponse.json(
+          { error: `Failed to update email: ${error.message}` },
+          { status: 500 }
+        )
+      }
+    }
+
+    // Update profile using admin client to bypass RLS
+    const { error: profileError } = await adminClient
       .from('profiles')
       .update(updateData)
-      .eq('id', params.userId)
+      .eq('id', userId)
 
     if (profileError) {
       return NextResponse.json(
@@ -43,19 +105,10 @@ export async function PUT(
       )
     }
 
-    // Note: Updating email and password requires Admin API
-    // For now, we'll just update the profile
-    if (password) {
-      return NextResponse.json(
-        { 
-          message: 'Profile updated. Password updates require Supabase Admin API.',
-          requiresAdminAPI: true
-        },
-        { status: 200 }
-      )
-    }
-
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ 
+      success: true,
+      message: password ? 'User updated successfully, including password.' : 'User updated successfully.'
+    })
   } catch (error: any) {
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
@@ -70,7 +123,7 @@ export async function PUT(
  */
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { userId: string } }
+  { params }: { params: Promise<{ userId: string }> }
 ) {
   try {
     const supabase = await createClient()
@@ -84,25 +137,47 @@ export async function DELETE(
       )
     }
 
-    // Note: Deleting from auth.users requires Admin API
-    // For now, we'll delete the profile
-    // In production, you would also delete from auth.users using Admin API
-    
-    const { error } = await supabase
+    const resolvedParams = await params
+    const userId = resolvedParams.userId
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: 'User ID is required' },
+        { status: 400 }
+      )
+    }
+
+    // Use admin client to delete from auth.users and profiles
+    const adminClient = createAdminClient()
+
+    // Delete from auth.users (requires Admin API)
+    try {
+      const { error: authError } = await adminClient.auth.admin.deleteUser(userId)
+      if (authError) {
+        console.error('Error deleting auth user:', authError)
+        // Continue to try deleting profile even if auth deletion fails
+      }
+    } catch (error: any) {
+      console.error('Exception deleting auth user:', error)
+      // Continue to try deleting profile
+    }
+
+    // Delete profile
+    const { error: profileError } = await adminClient
       .from('profiles')
       .delete()
-      .eq('id', params.userId)
+      .eq('id', userId)
 
-    if (error) {
+    if (profileError) {
       return NextResponse.json(
-        { error: error.message },
+        { error: profileError.message },
         { status: 500 }
       )
     }
 
     return NextResponse.json({ 
       success: true,
-      message: 'User profile deleted. Auth user deletion requires Admin API.'
+      message: 'User deleted successfully.'
     })
   } catch (error: any) {
     return NextResponse.json(

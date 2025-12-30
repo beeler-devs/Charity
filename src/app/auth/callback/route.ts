@@ -1,16 +1,50 @@
-import { createClient } from '@/lib/supabase/server'
-import { NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
+import { NextResponse, type NextRequest } from 'next/server'
+import { cookies } from 'next/headers'
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/home'
 
   if (code) {
-    const supabase = await createClient()
+    const cookieStore = await cookies()
+    
+    // Create response first so we can set cookies on it
+    const response = NextResponse.redirect(`${origin}${next}`)
+    
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return cookieStore.getAll()
+          },
+          setAll(cookiesToSet) {
+            cookiesToSet.forEach(({ name, value, options }) => {
+              cookieStore.set(name, value, options)
+              // Also set on the response to ensure cookies are included in redirect
+              response.cookies.set(name, value, options)
+            })
+          },
+        },
+      }
+    )
+    
     const { data, error } = await supabase.auth.exchangeCodeForSession(code)
     
-    if (!error && data.user) {
+    if (error) {
+      console.error('Error exchanging code for session:', error)
+      return NextResponse.redirect(`${origin}/auth/login?error=${encodeURIComponent(error.message || 'Could not authenticate user')}`)
+    }
+    
+    if (!data.user) {
+      console.error('No user data after code exchange')
+      return NextResponse.redirect(`${origin}/auth/login?error=${encodeURIComponent('Authentication failed - no user data')}`)
+    }
+    
+    if (data.user) {
       // Ensure profile exists after email confirmation
       // At this point, the user is fully confirmed and exists in auth.users
       const { data: existingProfile, error: checkError } = await supabase
@@ -127,7 +161,8 @@ export async function GET(request: Request) {
         console.error('Error linking event invitations in callback:', invitationLinkError)
       }
 
-      return NextResponse.redirect(`${origin}${next}`)
+      // Return the response with cookies already set via setAll callback
+      return response
     }
   }
 

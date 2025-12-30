@@ -95,6 +95,10 @@ export function EditPlayerDialog({ open, onOpenChange, teamId, player, onUpdated
       return
     }
 
+    // Get the old role to detect changes
+    const oldRole = player.role as 'captain' | 'co-captain' | 'player'
+    const roleChanged = oldRole !== role
+
     // Update roster member
     const { error } = await supabase
       .from('roster_members')
@@ -113,15 +117,63 @@ export function EditPlayerDialog({ open, onOpenChange, teamId, player, onUpdated
         description: error.message,
         variant: 'destructive',
       })
-    } else {
-      toast({
-        title: 'Player updated',
-        description: `${fullName}'s information has been updated`,
-      })
-      onUpdated()
-      onOpenChange(false)
+      setLoading(false)
+      return
     }
 
+    // If role changed and player has a user_id, update team's captain/co_captain_id
+    if (roleChanged && player.user_id) {
+      const teamUpdates: { captain_id?: string | null; co_captain_id?: string | null } = {}
+
+      // Clear old role assignments
+      if (oldRole === 'captain' && teamData.captain_id === player.user_id) {
+        teamUpdates.captain_id = null
+      }
+      if (oldRole === 'co-captain' && teamData.co_captain_id === player.user_id) {
+        teamUpdates.co_captain_id = null
+      }
+
+      // Set new role assignments
+      if (role === 'captain') {
+        teamUpdates.captain_id = player.user_id
+        // If they were co-captain, clear that
+        if (oldRole === 'co-captain') {
+          teamUpdates.co_captain_id = null
+        }
+      } else if (role === 'co-captain') {
+        teamUpdates.co_captain_id = player.user_id
+        // If they were captain, clear that
+        if (oldRole === 'captain') {
+          teamUpdates.captain_id = null
+        }
+      } else if (role === 'player') {
+        // Already cleared above if they were captain/co-captain
+      }
+
+      // Update team if there are changes
+      if (Object.keys(teamUpdates).length > 0) {
+        const { error: teamError } = await supabase
+          .from('teams')
+          .update(teamUpdates)
+          .eq('id', teamId)
+
+        if (teamError) {
+          console.error('Error updating team captain/co-captain:', teamError)
+          toast({
+            title: 'Warning',
+            description: 'Player role updated, but team assignment may not have been updated. Please check team settings.',
+            variant: 'default',
+          })
+        }
+      }
+    }
+
+    toast({
+      title: 'Player updated',
+      description: `${fullName}'s information has been updated`,
+    })
+    onUpdated()
+    onOpenChange(false)
     setLoading(false)
   }
 

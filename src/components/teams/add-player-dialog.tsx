@@ -286,6 +286,10 @@ export function AddPlayerDialog({ open, onOpenChange, teamId, onAdded }: AddPlay
           })
         } else {
           // Reactivate inactive member
+          const oldRole = existingMember.role as 'captain' | 'co-captain' | 'player' | undefined
+          const newRole = role || oldRole || 'player'
+          const roleChanged = oldRole !== newRole
+
           const { error: reactivateError } = await supabase
             .from('roster_members')
             .update({
@@ -294,7 +298,7 @@ export function AddPlayerDialog({ open, onOpenChange, teamId, onAdded }: AddPlay
               email: email || userToAdd.email || '',
               phone: phone || null,
               ntrp_rating: ntrpRating ? parseFloat(ntrpRating) : userToAdd.ntrp_rating || null,
-              role: role || 'player',
+              role: newRole,
             })
             .eq('id', existingMember.id)
 
@@ -305,6 +309,44 @@ export function AddPlayerDialog({ open, onOpenChange, teamId, onAdded }: AddPlay
               variant: 'destructive',
             })
           } else {
+            // If role changed and player has a user_id, update team's captain/co_captain_id
+            if (roleChanged && userToAdd.id) {
+              const teamUpdates: { captain_id?: string | null; co_captain_id?: string | null } = {}
+
+              // Clear old role assignments
+              if (oldRole === 'captain') {
+                teamUpdates.captain_id = null
+              }
+              if (oldRole === 'co-captain') {
+                teamUpdates.co_captain_id = null
+              }
+
+              // Set new role assignments
+              if (newRole === 'captain') {
+                teamUpdates.captain_id = userToAdd.id
+                if (oldRole === 'co-captain') {
+                  teamUpdates.co_captain_id = null
+                }
+              } else if (newRole === 'co-captain') {
+                teamUpdates.co_captain_id = userToAdd.id
+                if (oldRole === 'captain') {
+                  teamUpdates.captain_id = null
+                }
+              }
+
+              // Update team if there are changes
+              if (Object.keys(teamUpdates).length > 0) {
+                const { error: teamError } = await supabase
+                  .from('teams')
+                  .update(teamUpdates)
+                  .eq('id', teamId)
+
+                if (teamError) {
+                  console.error('Error updating team captain/co-captain:', teamError)
+                }
+              }
+            }
+
             toast({
               title: 'Player added',
               description: `${userToAdd.full_name || userToAdd.email} has been added to the roster`,
@@ -345,6 +387,31 @@ export function AddPlayerDialog({ open, onOpenChange, teamId, onAdded }: AddPlay
           variant: 'destructive',
         })
       } else {
+        // If role is captain or co-captain, update team's captain_id or co_captain_id
+        if (role === 'captain' || role === 'co-captain') {
+          const teamUpdates: { captain_id?: string | null; co_captain_id?: string | null } = {}
+          
+          if (role === 'captain') {
+            teamUpdates.captain_id = userToAdd.id
+          } else if (role === 'co-captain') {
+            teamUpdates.co_captain_id = userToAdd.id
+          }
+
+          const { error: teamError } = await supabase
+            .from('teams')
+            .update(teamUpdates)
+            .eq('id', teamId)
+
+          if (teamError) {
+            console.error('Error updating team captain/co-captain:', teamError)
+            toast({
+              title: 'Warning',
+              description: 'Player added, but team assignment may not have been updated. Please check team settings.',
+              variant: 'default',
+            })
+          }
+        }
+
         toast({
           title: 'Player added!',
           description: `${userToAdd.full_name || userToAdd.email} has been added to the roster`,
