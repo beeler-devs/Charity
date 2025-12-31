@@ -37,7 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { AddPersonalEventDialog } from '@/components/activities/add-personal-event-dialog'
+import { EditPersonalEventDialog } from '@/components/activities/edit-personal-event-dialog'
 import { getEffectiveUserId, getEffectiveUserEmail } from '@/lib/impersonation'
 
 interface Attendee {
@@ -304,7 +304,10 @@ export default function ActivityDetailPage() {
       <Header />
       <main className="container mx-auto px-4 py-6 max-w-4xl">
         <div className="flex items-center gap-4 mb-6">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+          <Button variant="ghost" size="icon" onClick={() => {
+            // Navigate back to calendar, preserving the saved date
+            router.push('/calendar')
+          }}>
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <h1 className="text-2xl font-bold">Activity Details</h1>
@@ -588,12 +591,13 @@ export default function ActivityDetailPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit Dialog - For now, we'll use the AddPersonalEventDialog but it needs to support editing */}
+      {/* Edit Dialog */}
       {showEditDialog && activity && (
-        <AddPersonalEventDialog
+        <EditPersonalEventDialog
           open={showEditDialog}
           onOpenChange={setShowEditDialog}
-          onAdded={() => {
+          activity={activity}
+          onUpdated={() => {
             setShowEditDialog(false)
             loadActivityData()
           }}

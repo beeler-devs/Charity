@@ -54,7 +54,25 @@ interface TeamInfo {
 function CalendarPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [currentDate, setCurrentDate] = useState(new Date())
+  // Initialize currentDate from localStorage if available, otherwise use current date
+  // This ensures we preserve the month when navigating back
+  const getInitialDate = () => {
+    if (typeof window !== 'undefined') {
+      const savedCurrentDate = localStorage.getItem('calendar-current-date')
+      if (savedCurrentDate) {
+        try {
+          const parsedDate = new Date(savedCurrentDate)
+          if (!isNaN(parsedDate.getTime())) {
+            return parsedDate
+          }
+        } catch (e) {
+          // Invalid date, use default
+        }
+      }
+    }
+    return new Date()
+  }
+  const [currentDate, setCurrentDate] = useState(getInitialDate())
   // Initialize with default values to avoid hydration mismatch
   // Load from localStorage in useEffect after mount
   const [viewMode, setViewMode] = useState<ViewMode>('week')
@@ -112,7 +130,38 @@ function CalendarPageContent() {
     if (savedHideOrganizerOnly === 'true') {
       setHideOrganizerOnlyEvents(true)
     }
-  }, [searchParams])
+
+    // Sync currentDate with localStorage (redundant check since initial state already loads it)
+    // This ensures the date is synced if localStorage was updated externally
+    const savedCurrentDate = localStorage.getItem('calendar-current-date')
+    if (savedCurrentDate) {
+      try {
+        const parsedDate = new Date(savedCurrentDate)
+        if (!isNaN(parsedDate.getTime())) {
+          // Only update if the date part is different (ignore time)
+          const currentYear = currentDate.getFullYear()
+          const currentMonth = currentDate.getMonth()
+          const currentDay = currentDate.getDate()
+          const savedYear = parsedDate.getFullYear()
+          const savedMonth = parsedDate.getMonth()
+          const savedDay = parsedDate.getDate()
+          
+          if (currentYear !== savedYear || currentMonth !== savedMonth || currentDay !== savedDay) {
+            setCurrentDate(parsedDate)
+          }
+        }
+      } catch (e) {
+        // Invalid date, use default
+      }
+    }
+  }, [searchParams]) // Removed currentDate from dependencies to avoid loops
+
+  // Save currentDate to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('calendar-current-date', currentDate.toISOString())
+    }
+  }, [currentDate])
 
   useEffect(() => {
     loadTeams()
@@ -1591,7 +1640,16 @@ function CalendarPageContent() {
                         </h3>
                         <div className="space-y-2">
                           {filteredCreated.map((activity: any) => (
-                            <Link key={activity.id} href={`/activities/${activity.id}`}>
+                            <Link 
+                              key={activity.id} 
+                              href={`/activities/${activity.id}`}
+                              onClick={() => {
+                                // Save current date before navigating
+                                if (typeof window !== 'undefined') {
+                                  localStorage.setItem('calendar-current-date', currentDate.toISOString())
+                                }
+                              }}
+                            >
                               <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                                 <CardContent className="p-4">
                                   <div className="flex items-start justify-between gap-3">
@@ -1650,7 +1708,16 @@ function CalendarPageContent() {
                         </h3>
                         <div className="space-y-2">
                           {filteredInvited.map((activity: any) => (
-                            <Link key={activity.id} href={`/activities/${activity.id}`}>
+                            <Link 
+                              key={activity.id} 
+                              href={`/activities/${activity.id}`}
+                              onClick={() => {
+                                // Save current date before navigating
+                                if (typeof window !== 'undefined') {
+                                  localStorage.setItem('calendar-current-date', currentDate.toISOString())
+                                }
+                              }}
+                            >
                               <Card className="hover:bg-accent/50 transition-colors cursor-pointer">
                                 <CardContent className="p-4">
                                   <div className="flex items-start justify-between gap-3">

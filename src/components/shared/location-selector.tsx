@@ -34,6 +34,8 @@ interface LocationSelectorProps {
   teamId?: string | null // Optional team ID for team-specific venues
   canCreateVenue?: boolean // Whether user can create new venues (default: false)
   onVenueSelected?: (venue: Venue | null) => void // Callback when venue is selected
+  modeSelectWidth?: string // Width for the mode select (default: 'w-32')
+  compactLayout?: boolean // If true, moves select closer to label (default: false)
 }
 
 export function LocationSelector({
@@ -46,6 +48,8 @@ export function LocationSelector({
   teamId,
   canCreateVenue = false,
   onVenueSelected,
+  modeSelectWidth = 'w-32',
+  compactLayout = false,
 }: LocationSelectorProps) {
   const [venues, setVenues] = useState<Venue[]>([])
   const [loadingVenues, setLoadingVenues] = useState(false)
@@ -120,12 +124,12 @@ export function LocationSelector({
 
   return (
     <>
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
+      <div className={compactLayout ? "space-y-1" : "space-y-2"}>
+        <div className={compactLayout ? "flex items-center gap-2" : "flex items-center justify-between"}>
           <Label htmlFor="location">Location</Label>
           <div className="flex items-center gap-2">
             <Select value={locationMode} onValueChange={handleLocationModeChange}>
-              <SelectTrigger className="w-32">
+              <SelectTrigger className={modeSelectWidth}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
